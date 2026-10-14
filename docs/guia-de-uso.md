@@ -32,8 +32,13 @@ powershell -ExecutionPolicy Bypass -File scripts\arranque_con_windows.ps1 -Quita
 - **Mis destinos**: lo marcado, de 5 en 5.
 - **Buscar destino**: por país, ciudad o código de aeropuerto. Lista 233 países y territorios con 4.008 aeropuertos con vuelos regulares, y el requisito de entrada con pasaporte español. Los que exigen visado previo están ocultos salvo que actives la casilla.
 - **Ficha de país**: ciudades concretas, fechas de salida, precio máximo y noches.
-- **Viajes baratos para los próximos meses**: lo más barato de cada mes en la última búsqueda, con lo marcado primero.
+- **Viajes baratos para los próximos meses**, en dos listas:
+  - **Tus destinos**: todas las ciudades que has marcado, una fila por ciudad (Londres junta Stansted, Gatwick, Heathrow...) con su vuelo más barato. Si la búsqueda de hoy no trae precio de una ciudad (pasa con las que solo se miran en Google, que son pocas fechas al día), sale el último precio conocido, con *visto el…*; si nunca se ha visto, *Sin precio todavía*. Cada ciudad y mes se vuelve a mirar en unas dos semanas.
+  - **Fuera de tu lista**: lo más barato de cada ciudad que no has marcado.
+  - Pestañas por mes y una de **Todos los meses**, donde cada ciudad lleva su vuelo más barato de toda la temporada.
+  - **Filtros**: fecha de salida (desde / hasta), precio máximo y destino (ciudad, país o código, en español o inglés). Con fechas o precio puestos, las ciudades tuyas sin vuelos que cumplan se resumen en una línea desplegable debajo de la lista.
 - **Ajustes**: meses hacia delante, noches de un viaje normal, umbral de chollo y tope de consultas a Google.
+- **Idioma y tema**: arriba a la derecha, **ES / EN** cambia todo el panel entre español e inglés (los avisos al móvil siguen en español), y el botón de luna / sol cambia entre tema claro y oscuro. Al principio se usa el tema de Windows; lo que elijas se recuerda en ese navegador.
 
 El panel es una web local en `http://127.0.0.1:8765`: solo escucha en tu ordenador y rechaza peticiones que no vengan de él mismo.
 
@@ -43,7 +48,7 @@ No es un modelo de lenguaje: es un bucle de reglas (`vigilante/agente.py`). En c
 
 | Paso | Qué hace |
 |---|---|
-| Planificar | Decide qué pedir hoy con un tope: primero las fechas de lo marcado, después los meses generales. Para ciudades sin Ryanair reparte las consultas diarias a Google y va rotando fechas |
+| Planificar | Decide qué pedir hoy con un tope: primero las fechas de lo marcado, después los meses generales. Después, Google para cada ciudad marcada y mes que Ryanair no haya cubierto hoy (también ciudades a las que Ryanair vuela, pero no desde tu aeropuerto): primero lo nunca visto y luego lo que lleva más tiempo sin precio, hasta el tope diario (25 por defecto) |
 | Consultar | Ryanair devuelve el ida y vuelta más barato a cada destino en un rango de fechas; Google, una ciudad y fechas concretas |
 | Recordar | Guarda todo en `data/ofertas.csv`; de ahí sale "lo que suele costar" cada destino y mes |
 | Decidir | Separa marcado / fuera de lista y aplica reglas distintas (abajo) |
@@ -124,7 +129,7 @@ La salida de cada ejecución se acumula en `data\ultima_ejecucion.log`. La tarea
 
 ## Las fuentes de datos (lo frágil)
 
-Ninguna es una API oficial. Las dos pueden romperse sin aviso y son zona gris de las condiciones de uso de cada web; aquí son unas 15-25 peticiones al día para uso personal.
+Ninguna es una API oficial. Las dos pueden romperse sin aviso y son zona gris de las condiciones de uso de cada web; aquí son unas 40 peticiones al día (hasta 14 a Ryanair y 25 a Google por defecto) para uso personal.
 
 - **Google Flights** (`fuentes/google_flights.py`): lee la página de resultados. Desde la UE envía la cookie equivalente a "Rechazar todo" en el aviso de cookies. El parseo es propio porque `fast-flights 3.1.0` ignora la lista "mejores vuelos".
 - **Ryanair** (`fuentes/ryanair.py`): la API interna de su buscador de tarifas. Solo vuelos de Ryanair.
@@ -140,6 +145,7 @@ Ninguna es una API oficial. Las dos pueden romperse sin aviso y son zona gris de
 - **OurAirports** (dominio público): aeropuertos con servicio regular y código IATA.
 - **passport-index-dataset** (datos de Passport Index, actualizado en feb-2026): requisito de entrada con pasaporte español. **Orientativo**: los visados cambian; confirma en la web del Ministerio de Exteriores antes de comprar.
 - Nombres de ciudad en español: los de Ryanair para sus aeropuertos y una lista manual para las grandes ciudades del mundo. El resto salen como en OurAirports (inglés o idioma local).
+- Nombres de ciudad en inglés (campo `en`, solo cuando cambian): los de Ryanair en inglés y una lista manual para las de la lista española. Los nombres de país en inglés no se guardan: los da el navegador.
 
 ## Estructura
 
@@ -153,13 +159,13 @@ vigilante/
   catalogo.py              países y ciudades
   bandeja.py               icono de la bandeja
   panel/servidor.py        servidor local del panel
-  panel/static/            interfaz (HTML, CSS, JS, mapa, tipografía)
+  panel/static/            interfaz (HTML, CSS, JS, textos en español e inglés, mapa, tipografía)
   fuentes/                 google_flights.py · ryanair.py
   historico.py · reglas.py · avisos.py
 data/                      se crea al ejecutar; no se sube
   intereses.json           lo marcado
   ofertas.csv              todo lo que ha visto el agente
-  recomendaciones.json     última lectura, para el panel
+  recomendaciones.json     última lectura para el panel: lo mejor de cada destino y mes
   precios.csv              histórico de los trayectos exactos
   estado.json              últimos avisos enviados y cursor del agente
 tests/                     reglas, parseo, agente, servidor y flujo completo

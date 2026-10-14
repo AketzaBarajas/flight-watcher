@@ -24,7 +24,7 @@ does not serve are only watched if the user picks specific cities, which go to G
 - SerpApi: kept as a paid fallback if the Google page parser breaks.
 
 Neither source in use is an official API. Both can change without notice, and the tool
-keeps to roughly 15–25 requests a day.
+keeps to roughly 40 requests a day (up to 14 to Ryanair, 25 to Google by default).
 
 ## A rule-based agent, not a language model
 
@@ -61,6 +61,39 @@ The panel is a standard-library HTTP server bound to `127.0.0.1:8765`. It reject
 whose `Host` header is not the panel's own address, or whose `Origin` (if present) is not the
 panel. That stops other websites open in the same browser from reading or changing the saved
 destinations. Front-end libraries, the map and the font are served from the package, with no CDN.
+
+## The panel shows every saved city, filtered in the browser
+
+The agent used to keep only the 12 cheapest trips of each month for the panel, so most saved
+cities never appeared. It now writes the best price of every destination and month it saw
+(a few hundred rows, about 160 KB). The panel groups airports by city, picks the cheapest flight
+for each saved city and applies the month, date, price and destination filters itself, so filtering
+needs no new server endpoint.
+
+Google answers one date per query, so it cannot price every saved city in every month each day
+(about 45 cities x 7 months = 300 pairs). Each saved city and month is a gap. Gaps that today's
+Ryanair results already fill are skipped. That includes cities Ryanair serves from other airports
+but not from the user's, which earlier versions never sent to Google. The rest are queried with
+the never-seen ones first, then the ones without a price for longest. A daily budget of 25 cycles
+through every gap in about two weeks.
+When a gap has no price today, the agent adds the last price seen for it, however old, taken from
+the most recent day only: an older minimum says nothing about today's price. These rows carry the
+day they were seen and never trigger alerts.
+
+Saved cities are worked out in the browser from the current saved destinations, so a city marked
+after the last search shows up straight away as "no price yet".
+
+## Two languages and two themes without a framework
+
+Panel strings live in `static/textos.js` as a Spanish and an English table; static HTML is tagged
+with `data-i18n` attributes. Country names in English come from the browser
+(`Intl.DisplayNames`), so only city names needed English data: an `en` field in the catalogue,
+set only when the name differs, from Ryanair's English airport list plus a hand-made list. Errors
+coming from the server's validation are still in Spanish. Alerts stay in Spanish.
+
+Colours are CSS variables with a dark set. The page follows the system theme until the user picks
+one; the choice (and the language) is stored in `localStorage`, and a small inline script applies
+the theme before the stylesheet paints to avoid a flash.
 
 ## Plain files instead of a database
 

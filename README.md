@@ -11,18 +11,20 @@ A personal flight-price watcher that checks fares once a day and only notifies y
 
 Price-alert tools either spam you every day or only watch one fixed route. flight-watcher does two jobs. It watches **exact routes** (a leg and specific dates, from `config.yaml`), and it runs a **destination agent**: you mark countries, cities and dates in a local panel, and it prioritises those, while anything you did not mark is only reported when it is a real bargain. It runs as a scheduled task on Windows and pushes alerts to your phone through [ntfy](https://ntfy.sh).
 
-The interface, the alerts and the code comments are in Spanish. A detailed Spanish user guide lives in [docs/guia-de-uso.md](docs/guia-de-uso.md).
+The panel can be switched between Spanish and English; the alerts and the code comments are in Spanish. A detailed Spanish user guide lives in [docs/guia-de-uso.md](docs/guia-de-uso.md).
 
 ## Features
 
 - **Exact routes:** for each leg in `config.yaml`, alerts when the best price (with your filters: stops, duration) drops under your maximum or 15 % below its recent average.
 - **Destination agent:** a rule-based loop (plan → query → remember → decide → act) that explores Ryanair's network from your airport and checks specific cities on Google Flights, within a daily query budget.
 - **Anti-noise rules:** "usual price" is the median of the daily best price per destination and month; an alert is not repeated unless the price improves 10 % or three weeks pass; at most 6 alerts for saved destinations and 3 for the rest per message.
-- **Local panel:** world map, saved destinations, search across 233 countries and territories with 4,008 airports that have scheduled service, and the cheapest trips for each upcoming month.
+- **Local panel:** world map, saved destinations, and search across 233 countries and territories with 4,008 airports that have scheduled service.
+- **Cheapest trip per saved city:** every city you marked is always listed with its cheapest flight. You can view one month or all of them, and filter by departure date, price and destination. Google queries are spent on the saved city-and-month pairs that Ryanair does not cover, those without a price for longest first, so every pair gets a price within about two weeks. When today's search has no price for a city, the panel shows the last one seen, with its date. Cheap places you did not mark are listed separately.
+- **Spanish or English, light or dark:** the panel switches language and theme from the top bar. It starts with the system theme and remembers your choice.
 - **Entry requirements:** each country shows the entry requirement for a Spanish passport; countries that need a visa in advance are hidden unless you ask for them.
 - **Runs unattended:** a Windows scheduled task fires hourly from 08:00, but only the first successful run of the day queries prices, so it still works if the PC was off in the morning.
 
-![Cheapest trips per month, with saved destinations marked "En tu lista"](docs/screenshots/recommendations.png)
+![Cheapest trips, with saved destinations listed first](docs/screenshots/recommendations.png)
 
 ## Tech stack
 
@@ -67,7 +69,7 @@ powershell -ExecutionPolicy Bypass -File scripts\arranque_con_windows.ps1   # tr
 .venv\Scripts\python -m pytest
 ```
 
-66 tests as of 2026-10-14, covering the alert rules, the Google Flights parser (against a saved response in `tests/fixtures/`), the agent's planning and decisions, the panel server's API and local-only checks, and an end-to-end run with the sources mocked. They run on every push in CI.
+71 tests as of 2026-10-14, covering the alert rules, the Google Flights parser (against a saved response in `tests/fixtures/`), the agent's planning and decisions, the panel server's API and local-only checks, and an end-to-end run with the sources mocked. They run on every push in CI.
 
 ## Architecture
 
@@ -102,7 +104,7 @@ Built with Claude Code as the implementing agent, directed by me. I decided what
 
 Running daily on my Windows PC since 2026-10-13.
 
-- **Fragile by nature:** neither price source is an official API. Both can break without notice, and scraping them is a grey area under each site's terms. This tool makes about 15–25 requests a day for personal use.
+- **Fragile by nature:** neither price source is an official API. Both can break without notice, and scraping them is a grey area under each site's terms. This tool makes about 40 requests a day (up to 14 to Ryanair, 25 to Google by default) for personal use.
 - **Prices** are per adult, basic fare, no luggage.
 - **Exploring "anywhere"** only covers Ryanair's network. Countries Ryanair does not fly to are only watched if you pick specific cities.
 - **Entry requirements** come from the passport-index-dataset (Feb 2026) and are indicative only.
