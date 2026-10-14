@@ -1,34 +1,32 @@
 /* Panel del vigilante de vuelos.
    Todo el estado vive en `E`; cada cambio de lo marcado se guarda en el servidor
    (data/intereses.json) y se vuelve a pintar. Los textos de datos externos entran
-   siempre con textContent, nunca como HTML. */
+   siempre con textContent, nunca como HTML. Los textos propios salen de TEXTOS
+   (textos.js), en el idioma elegido. */
 
 const POR_PAGINA_MIOS = 5;
 const POR_PAGINA_RESULTADOS = 7;
-const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
-const ENTRADA = {
-  propio: "Tu país",
-  sin_visado: "Sin visado",
-  visado_llegada: "Visado a la llegada",
-  eta: "Autorización electrónica previa (tipo ESTA)",
-  evisa: "Visado electrónico previo",
-  visado: "Exige visado previo",
-  no_admision: "No admite pasaporte español",
-  sin_dato: "Sin dato de entrada (territorio dependiente)",
-};
+const POR_PAGINA_TUYOS = 12;
+const POR_PAGINA_OTROS = 6;
 const SIN_ACCESO = new Set(["visado", "no_admision"]);
+const TODOS = "todos";
 
 const E = {
+  idioma: "es",
   paises: [],
   porIso: new Map(),
-  lugares: new Map(), // iata -> {ciudad, pais}
+  lugares: new Map(), // iata -> ciudad del catálogo + iso de su país
   intereses: null,
-  recomendaciones: { periodos: [] },
+  recomendaciones: { periodos: [], ofertas: [] },
+  estado: null,
   paginaMios: 0,
   paginaResultados: 0,
+  paginaTuyos: 0,
+  paginaOtros: 0,
   consulta: "",
   conVisado: false,
-  mes: null,
+  mes: TODOS,
+  filtros: { desde: "", hasta: "", precio: null, destino: "" },
   mapa: null,
 };
 
@@ -50,18 +48,119 @@ function el(etiqueta, atributos = {}, ...hijos) {
 const normalizar = (texto) =>
   texto.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
 
+// ------------------------------------------------------------ idioma y tema
+
+/** Lo que el navegador recuerda entre visitas. Sin almacenamiento, se usa lo de siempre. */
+function leerPreferencia(clave) {
+  try {
+    return localStorage.getItem(clave);
+  } catch {
+    return null;
+  }
+}
+
+function guardarPreferencia(clave, valor) {
+  try {
+    localStorage.setItem(clave, valor);
+  } catch {
+    // ventana privada o almacenamiento bloqueado: vale solo para esta visita
+  }
+}
+
+function t(clave, ...datos) {
+  const texto = TEXTOS[E.idioma][clave] ?? TEXTOS.es[clave] ?? clave;
+  return typeof texto === "function" ? texto(...datos) : texto;
+}
+
+const nombresIngles = (() => {
+  try {
+    return new Intl.DisplayNames(["en"], { type: "region" });
+  } catch {
+    return null;
+  }
+})();
+
+/** Nombre del país en inglés (el catálogo solo lo tiene en español). */
+function paisEnIngles(pais) {
+  try {
+    return nombresIngles?.of(pais.iso) || pais.nombre;
+  } catch {
+    return pais.nombre;
+  }
+}
+
+const nombrePais = (pais) => (E.idioma === "en" ? paisEnIngles(pais) : pais.nombre);
+const nombreCiudad = (ciudad) => (E.idioma === "en" && ciudad.en) || ciudad.ciudad;
+const comparar = (a, b) => a.localeCompare(b, t("locale"));
+
+function euros(precio) {
+  return new Intl.NumberFormat(t("locale"), {
+    style: "currency",
+    currency: "EUR",
+    maximumFractionDigits: 0,
+  }).format(Math.round(precio));
+}
+
 function fechaCorta(iso, conAnio = false) {
   const [anio, mes, dia] = iso.split("-").map(Number);
-  return `${dia} ${MESES[mes - 1]}${conAnio ? " " + anio : ""}`;
+  return `${dia} ${t("mesesCortos")[mes - 1]}${conAnio ? " " + anio : ""}`;
+}
+
+/** "2026-11" -> "noviembre 2026" / "November 2026". */
+function nombreMes(id) {
+  const [anio, mes] = id.split("-").map(Number);
+  return `${t("meses")[mes - 1]} ${anio}`;
 }
 
 function textoEntrada(entrada) {
-  const base = ENTRADA[entrada.tipo] || ENTRADA.sin_dato;
-  return entrada.dias ? `${base}, hasta ${entrada.dias} días` : base;
+  const base = t("entrada")[entrada.tipo] || t("entrada").sin_dato;
+  return entrada.dias ? t("entrada.dias", base, entrada.dias) : base;
 }
 
-function plural(n, uno, varios) {
-  return `${n} ${n === 1 ? uno : varios}`;
+function pintarTextosFijos() {
+  document.documentElement.lang = E.idioma;
+  document.title = t("titulo");
+  for (const nodo of document.querySelectorAll("[data-i18n]")) nodo.textContent = t(nodo.dataset.i18n);
+  for (const nodo of document.querySelectorAll("[data-i18n-placeholder]")) {
+    nodo.placeholder = t(nodo.dataset.i18nPlaceholder);
+  }
+  for (const nodo of document.querySelectorAll("[data-i18n-aria-label]")) {
+    nodo.setAttribute("aria-label", t(nodo.dataset.i18nAriaLabel));
+  }
+  for (const boton of document.querySelectorAll("[data-idioma]")) {
+    boton.setAttribute("aria-pressed", String(boton.dataset.idioma === E.idioma));
+  }
+}
+
+function cambiarIdioma(idioma) {
+  if (idioma === E.idioma || !TEXTOS[idioma]) return;
+  E.idioma = idioma;
+  guardarPreferencia("idioma", idioma);
+  pintarTextosFijos();
+  pintarTema();
+  pintarTodo();
+  pintarRecomendaciones();
+  if (E.estado) pintarEstado(E.estado);
+}
+
+const temaSistema = matchMedia("(prefers-color-scheme: dark)");
+
+/** El tema elegido en el panel, o si no el del sistema. */
+const temaActual = () => document.documentElement.dataset.theme || (temaSistema.matches ? "dark" : "light");
+
+function pintarTema() {
+  const boton = $("tema");
+  const oscuro = temaActual() === "dark";
+  boton.classList.toggle("oscuro", oscuro);
+  boton.setAttribute("aria-label", t(oscuro ? "tema.claro" : "tema.oscuro"));
+  boton.title = t(oscuro ? "tema.claro" : "tema.oscuro");
+}
+
+function cambiarTema() {
+  const tema = temaActual() === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = tema;
+  guardarPreferencia("tema", tema);
+  pintarTema();
 }
 
 // ------------------------------------------------------------------ servidor
@@ -69,7 +168,7 @@ function plural(n, uno, varios) {
 async function pedir(ruta, opciones) {
   const respuesta = await fetch(ruta, opciones);
   const datos = await respuesta.json().catch(() => ({}));
-  if (!respuesta.ok) throw new Error(datos.error || `El panel respondió ${respuesta.status}`);
+  if (!respuesta.ok) throw new Error(datos.error || t("error.panel", respuesta.status));
   return datos;
 }
 
@@ -81,6 +180,7 @@ async function guardar(nuevo) {
     body: JSON.stringify(nuevo),
   });
   pintarTodo();
+  pintarRecomendaciones();
 }
 
 function conPais(iso, datos) {
@@ -112,6 +212,15 @@ function avisarError(error) {
   estado.classList.add("mal");
 }
 
+/** Hasta oct-2026 el agente guardaba las ofertas dentro de cada mes: se aplanan. */
+function leerRecomendaciones(datos) {
+  const periodos = datos.periodos || [];
+  const ofertas =
+    datos.ofertas ||
+    periodos.flatMap((p) => p.ofertas || []).map((o) => ({ visto: datos.dia, ...o }));
+  return { ...datos, periodos, ofertas };
+}
+
 // --------------------------------------------------------------------- mapa
 
 async function crearMapa() {
@@ -135,8 +244,8 @@ async function crearMapa() {
   const mostrarGlobo = (evento, iso) => {
     const pais = E.porIso.get(iso);
     if (!pais) return;
-    globo.replaceChildren(el("strong", {}, pais.nombre), textoEntrada(pais.entrada));
-    if (E.intereses.paises[iso]) globo.append(el("div", {}, el("span", { class: "tuyo" }, "En tu lista")));
+    globo.replaceChildren(el("strong", {}, nombrePais(pais)), textoEntrada(pais.entrada));
+    if (E.intereses.paises[iso]) globo.append(el("div", {}, el("span", { class: "tuyo" }, t("en.lista"))));
     globo.hidden = false;
     const caja = seccion.getBoundingClientRect();
     const x = Math.min(evento.clientX - caja.left + 14, caja.width - globo.offsetWidth - 8);
@@ -173,9 +282,9 @@ async function crearMapa() {
   const calma = matchMedia("(prefers-reduced-motion: reduce)").matches;
   document.querySelectorAll("[data-zoom]").forEach((boton) =>
     boton.addEventListener("click", () => {
-      const t = svg.transition().duration(calma ? 0 : 220);
-      if (boton.dataset.zoom === "todo") t.call(zoom.transform, d3.zoomIdentity);
-      else t.call(zoom.scaleBy, boton.dataset.zoom === "acercar" ? 1.7 : 1 / 1.7);
+      const paso = svg.transition().duration(calma ? 0 : 220);
+      if (boton.dataset.zoom === "todo") paso.call(zoom.transform, d3.zoomIdentity);
+      else paso.call(zoom.scaleBy, boton.dataset.zoom === "acercar" ? 1.7 : 1 / 1.7);
     }),
   );
 
@@ -206,14 +315,12 @@ async function crearMapa() {
 }
 
 function pintarLeyenda() {
-  const nombres = Object.keys(E.intereses.paises).map((iso) => E.porIso.get(iso)?.nombre).filter(Boolean);
-  $("leyenda-texto").textContent = nombres.length
-    ? plural(nombres.length, "país marcado", "países marcados")
-    : "Ningún país marcado. Pulsa uno en el mapa o búscalo más abajo.";
-  $("mapa").setAttribute(
-    "aria-label",
-    nombres.length ? `Mapa del mundo. Marcados: ${nombres.sort().join(", ")}.` : "Mapa del mundo. Ningún país marcado.",
-  );
+  const nombres = Object.keys(E.intereses.paises)
+    .map((iso) => E.porIso.get(iso))
+    .filter(Boolean)
+    .map(nombrePais);
+  $("leyenda-texto").textContent = t("leyenda", nombres.length);
+  $("mapa").setAttribute("aria-label", t("mapa.aria", nombres.sort(comparar)));
 }
 
 // ------------------------------------------------------------ listas y páginas
@@ -222,9 +329,9 @@ function pintarPaginas(nav, pagina, total, alCambiar) {
   nav.replaceChildren();
   if (total <= 1) return;
   nav.append(
-    el("button", { type: "button", disabled: pagina === 0, onclick: () => alCambiar(pagina - 1) }, "Anterior"),
-    el("span", { "aria-live": "polite" }, `Página ${pagina + 1} de ${total}`),
-    el("button", { type: "button", disabled: pagina >= total - 1, onclick: () => alCambiar(pagina + 1) }, "Siguiente"),
+    el("button", { type: "button", disabled: pagina === 0, onclick: () => alCambiar(pagina - 1) }, t("anterior")),
+    el("span", { "aria-live": "polite" }, t("pagina", pagina + 1, total)),
+    el("button", { type: "button", disabled: pagina >= total - 1, onclick: () => alCambiar(pagina + 1) }, t("siguiente")),
   );
 }
 
@@ -241,28 +348,30 @@ function botonMarcar(marcado, nombre, alPulsar) {
       type: "button",
       class: "marcar",
       "aria-pressed": String(marcado),
-      "aria-label": `${marcado ? "Quitar" : "Marcar"} ${nombre}`,
+      "aria-label": t("marcar.aria", marcado, nombre),
       onclick: alPulsar,
     },
-    marcado ? "Marcado" : "Marcar",
+    t(marcado ? "marcado" : "marcar"),
   );
 }
 
-function resumenInteres(iso, interes) {
+function resumenInteres(interes) {
   const frases = [];
   if (interes.ciudades.length) {
-    const nombres = [...new Set(interes.ciudades.map((c) => E.lugares.get(c)?.ciudad || c))];
-    frases.push(nombres.join(", "));
+    const nombres = interes.ciudades.map((c) => (E.lugares.has(c) ? nombreCiudad(E.lugares.get(c)) : c));
+    frases.push([...new Set(nombres)].join(", "));
   } else {
-    frases.push("Todas las ciudades");
+    frases.push(t("resumen.todas"));
   }
   frases.push(
     interes.ventanas.length
-      ? interes.ventanas.map((v) => `del ${fechaCorta(v.desde)} al ${fechaCorta(v.hasta, true)}`).join(" y ")
-      : "cualquier fecha",
+      ? interes.ventanas
+          .map((v) => t("resumen.ventana", fechaCorta(v.desde), fechaCorta(v.hasta, true)))
+          .join(t("resumen.y"))
+      : t("resumen.cualquiera"),
   );
-  if (interes.precio_max) frases.push(`menos de ${interes.precio_max} €`);
-  if (interes.noches) frases.push(`${interes.noches[0]} a ${interes.noches[1]} noches`);
+  if (interes.precio_max) frases.push(t("resumen.precio", euros(interes.precio_max)));
+  if (interes.noches) frases.push(t("resumen.noches", interes.noches[0], interes.noches[1]));
   return frases.join("; ") + ".";
 }
 
@@ -270,22 +379,15 @@ function pintarMios() {
   const marcados = Object.entries(E.intereses.paises)
     .map(([iso, interes]) => ({ pais: E.porIso.get(iso), interes }))
     .filter((m) => m.pais)
-    .sort((a, b) => a.pais.nombre.localeCompare(b.pais.nombre, "es"));
+    .sort((a, b) => comparar(nombrePais(a.pais), nombrePais(b.pais)));
   const paginas = Math.ceil(marcados.length / POR_PAGINA_MIOS);
   E.paginaMios = Math.max(0, Math.min(E.paginaMios, paginas - 1));
 
-  $("mios-titulo").replaceChildren("Mis destinos", marcados.length ? el("small", {}, ` ${marcados.length}`) : "");
+  $("mios-titulo").replaceChildren(t("mios.titulo"), marcados.length ? el("small", {}, ` ${marcados.length}`) : "");
   const lista = $("lista-mios");
   lista.replaceChildren();
   if (!marcados.length) {
-    lista.append(
-      el(
-        "li",
-        { class: "vacio" },
-        el("strong", {}, "Todavía no has marcado ningún destino."),
-        "Búscalo a la derecha o púlsalo en el mapa. Lo marcado se vigila a diario; del resto solo te llegan los chollos.",
-      ),
-    );
+    lista.append(el("li", { class: "vacio" }, el("strong", {}, t("mios.vacio")), t("mios.vacio.texto")));
   }
   const visibles = marcados.slice(E.paginaMios * POR_PAGINA_MIOS, (E.paginaMios + 1) * POR_PAGINA_MIOS);
   for (const { pais, interes } of visibles) {
@@ -296,10 +398,10 @@ function pintarMios() {
         el(
           "div",
           { class: "datos" },
-          el("button", { type: "button", class: "nombre", onclick: () => abrirFicha(pais.iso) }, pais.nombre),
-          el("span", { class: "detalle" }, resumenInteres(pais.iso, interes)),
+          el("button", { type: "button", class: "nombre", onclick: () => abrirFicha(pais.iso) }, nombrePais(pais)),
+          el("span", { class: "detalle" }, resumenInteres(interes)),
         ),
-        el("button", { type: "button", class: "boton secundario", onclick: () => abrirFicha(pais.iso) }, "Editar"),
+        el("button", { type: "button", class: "boton secundario", onclick: () => abrirFicha(pais.iso) }, t("editar")),
       ),
     );
   }
@@ -310,21 +412,26 @@ function pintarMios() {
   });
 }
 
+/** Se busca en los dos idiomas: "Alemania" y "Germany" encuentran lo mismo. */
 function buscar() {
   const q = normalizar(E.consulta);
   const visibles = E.paises.filter((p) => E.conVisado || !SIN_ACCESO.has(p.entrada.tipo));
-  if (!q) return visibles.map((pais) => ({ pais }));
+  if (!q) return visibles.map((pais) => ({ pais })).sort((a, b) => comparar(nombrePais(a.pais), nombrePais(b.pais)));
 
   const resultados = visibles
-    .filter((p) => normalizar(p.nombre).includes(q) || p.iso.toLowerCase() === q)
-    .map((pais) => ({ pais, orden: normalizar(pais.nombre).startsWith(q) ? 0 : 1 }));
+    .filter((p) => [p.nombre, paisEnIngles(p)].some((n) => normalizar(n).includes(q)) || p.iso.toLowerCase() === q)
+    .map((pais) => ({ pais, orden: normalizar(nombrePais(pais)).startsWith(q) ? 0 : 1 }));
   if (q.length >= 2) {
     for (const pais of visibles) {
       for (const ciudad of pais.ciudades) {
-        const nombre = normalizar(ciudad.ciudad);
+        const nombres = [ciudad.ciudad, ciudad.en].filter(Boolean).map(normalizar);
         const esCodigo = ciudad.iata.toLowerCase() === q;
-        if (esCodigo || nombre.includes(q) || (q.length >= 4 && normalizar(ciudad.aeropuerto).includes(q))) {
-          const peso = esCodigo ? 0 : nombre.startsWith(q) ? 2 : 3;
+        if (
+          esCodigo ||
+          nombres.some((n) => n.includes(q)) ||
+          (q.length >= 4 && normalizar(ciudad.aeropuerto).includes(q))
+        ) {
+          const peso = esCodigo ? 0 : nombres.some((n) => n.startsWith(q)) ? 2 : 3;
           resultados.push({ pais, ciudad, orden: peso + "LMS".indexOf(ciudad.tam) / 10 });
         }
       }
@@ -344,10 +451,8 @@ function pintarResultados() {
       el(
         "li",
         { class: "vacio" },
-        el("strong", {}, `Nada con «${E.consulta}».`),
-        E.conVisado
-          ? "Prueba con el nombre del país, la ciudad o el código de tres letras del aeropuerto."
-          : "Prueba con otro nombre, o activa los países que exigen visado previo.",
+        el("strong", {}, t("resultados.nada", E.consulta)),
+        t(E.conVisado ? "resultados.prueba.visado" : "resultados.prueba"),
       ),
     );
   }
@@ -367,12 +472,12 @@ function pintarResultados() {
             el(
               "button",
               { type: "button", class: "nombre", onclick: () => abrirFicha(pais.iso) },
-              `${ciudad.ciudad} `,
+              `${nombreCiudad(ciudad)} `,
               el("span", { class: "codigo" }, ciudad.iata),
             ),
-            el("span", { class: "detalle" }, `${ciudad.aeropuerto}, ${pais.nombre}`),
+            el("span", { class: "detalle" }, `${ciudad.aeropuerto}, ${nombrePais(pais)}`),
           ),
-          botonMarcar(marcada, `${ciudad.ciudad} (${ciudad.iata})`, () => alternarCiudad(pais.iso, ciudad.iata)),
+          botonMarcar(marcada, `${nombreCiudad(ciudad)} (${ciudad.iata})`, () => alternarCiudad(pais.iso, ciudad.iata)),
         ),
       );
     } else {
@@ -383,14 +488,10 @@ function pintarResultados() {
           el(
             "div",
             { class: "datos" },
-            el("button", { type: "button", class: "nombre", onclick: () => abrirFicha(pais.iso) }, pais.nombre),
-            el(
-              "span",
-              { class: "detalle" },
-              `${textoEntrada(pais.entrada)}. ${plural(pais.ciudades.length, "aeropuerto", "aeropuertos")}.`,
-            ),
+            el("button", { type: "button", class: "nombre", onclick: () => abrirFicha(pais.iso) }, nombrePais(pais)),
+            el("span", { class: "detalle" }, `${textoEntrada(pais.entrada)}. ${t("aeropuertos", pais.ciudades.length)}.`),
           ),
-          botonMarcar(Boolean(interes), pais.nombre, () => alternarPais(pais.iso)),
+          botonMarcar(Boolean(interes), nombrePais(pais), () => alternarPais(pais.iso)),
         ),
       );
     }
@@ -404,31 +505,112 @@ function pintarResultados() {
 
 // ---------------------------------------------------------- recomendaciones
 
-function pintarRecomendaciones() {
-  const periodos = E.recomendaciones.periodos || [];
-  const meses = $("meses");
-  const panel = $("ofertas");
-  meses.replaceChildren();
-  panel.replaceChildren();
-  $("rec-nota").textContent = "";
-
-  if (!periodos.some((p) => p.ofertas.length)) {
-    meses.hidden = true;
-    panel.append(
-      el(
-        "p",
-        { class: "sin-ofertas" },
-        el("strong", {}, "Todavía no hay ninguna búsqueda."),
-        "Pulsa «Buscar vuelos ahora», arriba. Tarda medio minuto y después se repite sola cada día.",
-      ),
-    );
-    return;
+/** Las ciudades marcadas, una por nombre: Londres junta LHR, LGW, STN... */
+function misCiudades() {
+  const grupos = new Map();
+  for (const [iso, interes] of Object.entries(E.intereses.paises)) {
+    const pais = E.porIso.get(iso);
+    if (!pais) continue;
+    // Sin ciudades elegidas, el agente vigila las del país a las que vuela Ryanair.
+    const ciudades = interes.ciudades.length
+      ? pais.ciudades.filter((c) => interes.ciudades.includes(c.iata))
+      : pais.ciudades.filter((c) => c.ry);
+    for (const ciudad of ciudades) {
+      const clave = `${iso}|${ciudad.ciudad}`;
+      if (!grupos.has(clave)) grupos.set(clave, { clave, pais, ciudad, aeropuertos: new Set() });
+      grupos.get(clave).aeropuertos.add(ciudad.iata);
+    }
   }
-  meses.hidden = false;
-  if (!periodos.some((p) => p.id === E.mes)) E.mes = periodos.find((p) => p.ofertas.length).id;
+  return [...grupos.values()];
+}
 
-  for (const p of periodos) {
-    meses.append(
+/** ¿Encaja con lo escrito en el filtro de destino? Se mira en los dos idiomas. */
+function coincide(q, ciudad, pais, aeropuertos) {
+  if (!q) return true;
+  const textos = [ciudad.ciudad, ciudad.en, pais.nombre, paisEnIngles(pais)].filter(Boolean).map(normalizar);
+  return textos.some((texto) => texto.includes(q)) || aeropuertos.some((iata) => iata.toLowerCase() === q);
+}
+
+const hayFiltroDeViaje = () => Boolean(E.filtros.desde || E.filtros.hasta || E.filtros.precio);
+
+/** Las ofertas del mes elegido que cumplen las fechas y el precio. */
+function ofertasVisibles() {
+  const { desde, hasta, precio } = E.filtros;
+  return E.recomendaciones.ofertas.filter(
+    (o) =>
+      (E.mes === TODOS || o.ida.startsWith(E.mes)) &&
+      (!desde || o.ida >= desde) &&
+      (!hasta || o.ida <= hasta) &&
+      (!precio || o.precio <= precio),
+  );
+}
+
+function filaOferta(o, tuya) {
+  const lugar = E.lugares.get(o.destino);
+  const pais = E.porIso.get(o.pais);
+  const noches = Math.round((new Date(o.vuelta) - new Date(o.ida)) / 86400000);
+  const deOtroDia = o.visto && o.visto !== E.recomendaciones.dia;
+  return el(
+    "a",
+    { class: tuya ? "oferta tuya" : "oferta", href: o.enlace, target: "_blank", rel: "noopener" },
+    el("span", { class: "banda" }),
+    el(
+      "span",
+      {},
+      el("span", { class: "ciudad" }, lugar ? nombreCiudad(lugar) : o.ciudad),
+      el("span", { class: "pais" }, `${pais ? nombrePais(pais) : o.pais_nombre} · ${o.destino}`),
+    ),
+    el(
+      "span",
+      {},
+      el("span", { class: "fechas" }, `${fechaCorta(o.ida)} – ${fechaCorta(o.vuelta)}`),
+      el("span", { class: "noches" }, t("noches", noches)),
+    ),
+    el("span", { class: "aerolinea" }, o.aerolinea),
+    el(
+      "span",
+      { class: "precio" },
+      euros(o.precio),
+      el("small", {}, t("iv")),
+      deOtroDia ? el("small", { class: "visto" }, t("visto", fechaCorta(o.visto))) : null,
+    ),
+  );
+}
+
+function filaSinPrecio(grupo) {
+  return el(
+    "div",
+    { class: "oferta tuya sin-precio" },
+    el("span", { class: "banda" }),
+    el(
+      "span",
+      {},
+      el("span", { class: "ciudad" }, nombreCiudad(grupo.ciudad)),
+      el("span", { class: "pais" }, `${nombrePais(grupo.pais)} · ${[...grupo.aeropuertos].sort().join(" ")}`),
+    ),
+    el("span", { class: "falta" }, E.mes === TODOS ? t("sin.todavia") : t("sin.mes", nombreMes(E.mes))),
+  );
+}
+
+/** Un bloque con título, filas y páginas. `filas` ya viene ordenado. */
+function bloque({ titulo, ayuda, filas, pagina, porPagina, etiquetaPaginas, alCambiar, vacio, extra }) {
+  const paginas = Math.ceil(filas.length / porPagina);
+  const actual = Math.max(0, Math.min(pagina, paginas - 1));
+  const lista = el("div", { class: "lista-ofertas" }, ...filas.slice(actual * porPagina, (actual + 1) * porPagina));
+  if (!filas.length && vacio) lista.append(el("p", { class: "sin-ofertas" }, vacio));
+  const nav = el("nav", { class: "paginas", "aria-label": etiquetaPaginas });
+  pintarPaginas(nav, actual, paginas, alCambiar);
+  return el("section", { class: "grupo" }, el("h3", {}, ...titulo), el("p", { class: "ayuda" }, ayuda), lista, extra, nav);
+}
+
+function pintarMeses() {
+  const meses = $("meses");
+  const pestanas = [
+    { id: TODOS, etiqueta: t("rec.todos") },
+    ...E.recomendaciones.periodos.map((p) => ({ id: p.id, etiqueta: nombreMes(p.id) })),
+  ];
+  meses.replaceChildren(
+    ...pestanas.map((p) =>
       el(
         "button",
         {
@@ -437,49 +619,154 @@ function pintarRecomendaciones() {
           "aria-selected": String(p.id === E.mes),
           onclick: () => {
             E.mes = p.id;
+            E.paginaTuyos = E.paginaOtros = 0;
             pintarRecomendaciones();
           },
         },
         p.etiqueta,
       ),
-    );
-  }
+    ),
+  );
+}
 
-  const activo = periodos.find((p) => p.id === E.mes);
-  if (!activo.ofertas.length) {
-    panel.append(el("p", { class: "sin-ofertas" }, `La última búsqueda no encontró viajes para ${activo.etiqueta}.`));
-  }
-  for (const o of activo.ofertas) {
-    const noches = Math.round((new Date(o.vuelta) - new Date(o.ida)) / 86400000);
-    panel.append(
-      el(
-        "a",
-        { class: o.marcado ? "oferta tuya" : "oferta", href: o.enlace, target: "_blank", rel: "noopener" },
-        el("span", { class: "banda" }),
-        el(
-          "span",
-          {},
-          el("span", { class: "ciudad" }, o.ciudad),
-          o.marcado ? el("span", { class: "etiqueta" }, "En tu lista") : null,
-          el("span", { class: "pais" }, o.pais_nombre),
-        ),
-        el(
-          "span",
-          {},
-          el("span", { class: "fechas" }, `${fechaCorta(o.ida)} – ${fechaCorta(o.vuelta)}`),
-          el("span", { class: "noches" }, plural(noches, "noche", "noches")),
-        ),
-        el("span", { class: "aerolinea" }, o.aerolinea),
-        el("span", { class: "precio" }, `${Math.round(o.precio)} €`, el("small", {}, "ida y vuelta")),
-      ),
-    );
-  }
+function pintarRecomendaciones() {
+  const rec = E.recomendaciones;
+  const panel = $("ofertas");
+  panel.replaceChildren();
+  $("rec-nota").textContent = "";
+  $("f-limpiar").hidden = !(hayFiltroDeViaje() || E.filtros.destino);
 
-  const [dia, hora] = (E.recomendaciones.generado || "").split("T");
+  if (!rec.ofertas.length) {
+    $("meses").hidden = $("filtros").hidden = true;
+    panel.append(el("p", { class: "sin-ofertas" }, el("strong", {}, t("rec.vacio")), t("rec.vacio.texto")));
+    return;
+  }
+  $("meses").hidden = $("filtros").hidden = false;
+  if (!rec.periodos.some((p) => p.id === E.mes)) E.mes = TODOS;
+  pintarMeses();
+
+  const ofertas = ofertasVisibles();
+  const q = normalizar(E.filtros.destino);
+  const filtrando = hayFiltroDeViaje();
+
+  // Tus destinos: siempre todas las ciudades marcadas, con su vuelo más barato.
+  const mias = misCiudades();
+  const conPrecio = [];
+  const sinPrecio = [];
+  for (const grupo of mias) {
+    if (!coincide(q, grupo.ciudad, grupo.pais, [...grupo.aeropuertos])) continue;
+    let mejor = null;
+    for (const o of ofertas) {
+      if (o.marcado && grupo.aeropuertos.has(o.destino) && (!mejor || o.precio < mejor.precio)) mejor = o;
+    }
+    if (mejor) conPrecio.push({ grupo, oferta: mejor });
+    else sinPrecio.push(grupo);
+  }
+  conPrecio.sort((a, b) => a.oferta.precio - b.oferta.precio || a.oferta.ida.localeCompare(b.oferta.ida));
+  sinPrecio.sort((a, b) => comparar(nombreCiudad(a.ciudad), nombreCiudad(b.ciudad)));
+
+  // Con fechas o precio puestos, lo que no tiene vuelos se resume aparte en vez
+  // de ocupar media lista; sin ellos, va al final con su "sin precio".
+  const filasTuyas = conPrecio.map(({ oferta }) => filaOferta(oferta, true));
+  let resumen = null;
+  if (filtrando && sinPrecio.length) {
+    resumen = el(
+      "details",
+      { class: "sin-vuelos" },
+      el("summary", {}, t("sin.filtros", sinPrecio.length)),
+      el("p", {}, sinPrecio.map((g) => nombreCiudad(g.ciudad)).join(", ")),
+    );
+  } else {
+    filasTuyas.push(...sinPrecio.map(filaSinPrecio));
+  }
+  let vacioTuyo = null;
+  if (!mias.length) vacioTuyo = t("rec.tuyos.ninguno");
+  else if (!conPrecio.length && !sinPrecio.length) vacioTuyo = t("rec.tuyos.nada", E.filtros.destino);
+
+  // Fuera de tu lista: lo más barato de cada ciudad que no has marcado.
+  const misClaves = new Set(mias.map((g) => g.clave));
+  const otras = new Map();
+  for (const o of ofertas) {
+    const lugar = E.lugares.get(o.destino);
+    const pais = E.porIso.get(o.pais);
+    if (o.marcado || !lugar || !pais) continue;
+    const clave = `${lugar.pais}|${lugar.ciudad}`;
+    if (misClaves.has(clave) || !coincide(q, lugar, pais, [o.destino])) continue;
+    if (!otras.has(clave) || o.precio < otras.get(clave).precio) otras.set(clave, o);
+  }
+  const filasOtras = [...otras.values()]
+    .sort((a, b) => a.precio - b.precio || a.ida.localeCompare(b.ida))
+    .map((o) => filaOferta(o, false));
+
+  panel.append(
+    bloque({
+      titulo: [t("rec.tuyos"), mias.length ? el("small", {}, ` ${conPrecio.length + sinPrecio.length}`) : null],
+      ayuda: t("rec.tuyos.ayuda"),
+      filas: filasTuyas,
+      pagina: E.paginaTuyos,
+      porPagina: POR_PAGINA_TUYOS,
+      etiquetaPaginas: t("rec.paginas.tuyos"),
+      alCambiar: (p) => {
+        E.paginaTuyos = p;
+        pintarRecomendaciones();
+      },
+      vacio: vacioTuyo,
+      extra: resumen,
+    }),
+    bloque({
+      titulo: [t("rec.otros")],
+      ayuda: t("rec.otros.ayuda"),
+      filas: filasOtras,
+      pagina: E.paginaOtros,
+      porPagina: POR_PAGINA_OTROS,
+      etiquetaPaginas: t("rec.paginas.otros"),
+      alCambiar: (p) => {
+        E.paginaOtros = p;
+        pintarRecomendaciones();
+      },
+      vacio: t("rec.otros.nada"),
+    }),
+  );
+
+  const [dia, hora] = (rec.generado || "").split("T");
+  const hayAntiguos = conPrecio.some(({ oferta }) => oferta.visto && oferta.visto !== rec.dia);
   $("rec-nota").textContent =
-    `Precios por persona en tarifa básica, sin maleta, saliendo de ${E.recomendaciones.origen}. ` +
-    (dia ? `Vistos el ${fechaCorta(dia)} a las ${hora}. ` : "") +
-    "Cada fila abre esa búsqueda en Google Flights para comparar antes de comprar.";
+    t("rec.nota", rec.origen) +
+    (dia ? t("rec.nota.cuando", fechaCorta(dia), hora) : "") +
+    (hayAntiguos ? t("rec.nota.antiguos") : "") +
+    t("rec.nota.enlace");
+}
+
+/** Los límites de las fechas del filtro: de mañana al final del último mes que se mira. */
+function limitarFechasFiltro() {
+  const periodos = E.recomendaciones.periodos;
+  if (!periodos.length) return;
+  const [anio, mes] = periodos.at(-1).id.split("-").map(Number);
+  const ultimo = `${periodos.at(-1).id}-${String(new Date(anio, mes, 0).getDate()).padStart(2, "0")}`;
+  for (const id of ["f-desde", "f-hasta"]) {
+    $(id).min = E.recomendaciones.dia || "";
+    $(id).max = ultimo;
+  }
+}
+
+function prepararFiltros() {
+  const alCambiar = () => {
+    const precio = Number($("f-precio").value);
+    E.filtros = {
+      desde: $("f-desde").value,
+      hasta: $("f-hasta").value,
+      precio: precio > 0 ? precio : null,
+      destino: $("f-destino").value,
+    };
+    E.paginaTuyos = E.paginaOtros = 0;
+    pintarRecomendaciones();
+  };
+  for (const id of ["f-desde", "f-hasta", "f-precio", "f-destino"]) $(id).addEventListener("input", alCambiar);
+  $("f-limpiar").addEventListener("click", () => {
+    for (const id of ["f-desde", "f-hasta", "f-precio", "f-destino"]) $(id).value = "";
+    alCambiar();
+    $("f-desde").focus();
+  });
 }
 
 // --------------------------------------------------------------- ficha de país
@@ -495,9 +782,9 @@ function abrirFicha(iso) {
   ficha.borrador = structuredClone(actual || interesVacio());
   ficha.elegidasAlAbrir = new Set(ficha.borrador.ciudades);
 
-  $("ficha-titulo").textContent = pais.nombre;
+  $("ficha-titulo").textContent = nombrePais(pais);
   $("ficha-entrada").textContent = textoEntrada(pais.entrada) + ".";
-  $("ficha-guardar").textContent = ficha.esNuevo ? "Marcar país" : "Guardar cambios";
+  $("ficha-guardar").textContent = t(ficha.esNuevo ? "ficha.marcar" : "ficha.guardar");
   $("ficha-quitar").hidden = ficha.esNuevo;
   $("ficha-error").hidden = true;
   $("ficha-filtro").value = "";
@@ -507,9 +794,9 @@ function abrirFicha(iso) {
   $("ficha-noches-max").value = ficha.borrador.noches?.[1] ?? "";
   $("ficha-noches-min").placeholder = E.intereses.ajustes.noches_min;
   $("ficha-noches-max").placeholder = E.intereses.ajustes.noches_max;
-  $("ficha-ciudades-ayuda").textContent = pais.ciudades.some((c) => c.ry)
-    ? "Sin elegir ninguna, vigilo todas las ciudades del país a las que vuela Ryanair. Las demás solo se miran si las eliges aquí."
-    : "Ryanair no vuela a este país: elige las ciudades que quieres que mire en Google. Sin ciudades elegidas no puedo vigilarlo.";
+  $("ficha-ciudades-ayuda").textContent = t(
+    pais.ciudades.some((c) => c.ry) ? "ficha.ayuda.ryanair" : "ficha.ayuda.google",
+  );
 
   pintarCiudadesFicha();
   pintarVentanasFicha();
@@ -523,9 +810,9 @@ function pintarCiudadesFicha() {
   lista.replaceChildren();
   // Las que ya estaban elegidas al abrir van arriba (no se reordena mientras marcas).
   const visibles = pais.ciudades
-    .filter((c) => !filtro || normalizar(`${c.ciudad} ${c.aeropuerto} ${c.iata}`).includes(filtro))
+    .filter((c) => !filtro || normalizar(`${c.ciudad} ${c.en || ""} ${c.aeropuerto} ${c.iata}`).includes(filtro))
     .sort((a, b) => ficha.elegidasAlAbrir.has(b.iata) - ficha.elegidasAlAbrir.has(a.iata));
-  if (!visibles.length) lista.append(el("li", { class: "nada" }, "Ninguna ciudad coincide con el filtro."));
+  if (!visibles.length) lista.append(el("li", { class: "nada" }, t("ficha.nada")));
   for (const c of visibles) {
     const casilla = el("input", { type: "checkbox", checked: ficha.borrador.ciudades.includes(c.iata) });
     casilla.addEventListener("change", () => {
@@ -542,7 +829,7 @@ function pintarCiudadesFicha() {
           {},
           casilla,
           el("span", { class: "codigo" }, c.iata),
-          el("span", { class: "lugar" }, c.ciudad, el("span", { class: "aeropuerto" }, c.aeropuerto)),
+          el("span", { class: "lugar" }, nombreCiudad(c), el("span", { class: "aeropuerto" }, c.aeropuerto)),
           c.ry ? el("span", { class: "ryanair" }, "Ryanair") : null,
         ),
       ),
@@ -554,17 +841,17 @@ function pintarVentanasFicha() {
   const lista = $("ficha-ventanas");
   lista.replaceChildren();
   ficha.borrador.ventanas.forEach((ventana, i) => {
-    const desde = el("input", { type: "date", value: ventana.desde, "aria-label": "Desde" });
-    const hasta = el("input", { type: "date", value: ventana.hasta, "aria-label": "Hasta" });
+    const desde = el("input", { type: "date", value: ventana.desde, "aria-label": t("ficha.desde") });
+    const hasta = el("input", { type: "date", value: ventana.hasta, "aria-label": t("ficha.hasta") });
     desde.addEventListener("change", () => (ventana.desde = desde.value));
     hasta.addEventListener("change", () => (ventana.hasta = hasta.value));
     lista.append(
       el(
         "li",
         {},
-        "Del",
+        t("ficha.del"),
         desde,
-        "al",
+        t("ficha.al"),
         hasta,
         el(
           "button",
@@ -576,7 +863,7 @@ function pintarVentanasFicha() {
               pintarVentanasFicha();
             },
           },
-          "Quitar fechas",
+          t("ficha.quitar.fechas"),
         ),
       ),
     );
@@ -593,9 +880,7 @@ async function guardarFicha(evento) {
   const b = ficha.borrador;
   const nMin = $("ficha-noches-min").value;
   const nMax = $("ficha-noches-max").value;
-  if (Boolean(nMin) !== Boolean(nMax)) {
-    return mostrarError("ficha-error", "Rellena las dos casillas de noches, o deja las dos vacías.");
-  }
+  if (Boolean(nMin) !== Boolean(nMax)) return mostrarError("ficha-error", t("ficha.error.noches"));
   const datos = {
     ciudades: b.ciudades,
     ventanas: b.ventanas.filter((v) => v.desde || v.hasta),
@@ -644,7 +929,8 @@ async function guardarAjustes(evento) {
 
 function pintarOrigen() {
   $("origen").value = E.intereses.origen;
-  $("origen-ciudad").textContent = E.lugares.get(E.intereses.origen)?.ciudad || "";
+  const lugar = E.lugares.get(E.intereses.origen);
+  $("origen-ciudad").textContent = lugar ? nombreCiudad(lugar) : "";
 }
 
 async function cambiarOrigen() {
@@ -653,7 +939,7 @@ async function cambiarOrigen() {
   try {
     await guardar({ ...E.intereses, origen: nuevo });
     $("estado").classList.remove("mal");
-    $("estado").textContent = `Ahora busco saliendo de ${nuevo}. Pulsa «Buscar vuelos ahora» para actualizar.`;
+    $("estado").textContent = t("estado.origen", nuevo);
   } catch (error) {
     pintarOrigen();
     avisarError(error);
@@ -661,21 +947,22 @@ async function cambiarOrigen() {
 }
 
 function pintarEstado(estado) {
+  E.estado = estado;
   const linea = $("estado");
   const boton = $("buscar");
   boton.disabled = estado.buscando;
-  boton.textContent = estado.buscando ? "Buscando…" : "Buscar vuelos ahora";
+  boton.textContent = t(estado.buscando ? "buscando" : "buscar");
   linea.classList.remove("mal");
   if (estado.buscando) {
-    linea.textContent = "Buscando vuelos. Suele tardar medio minuto.";
+    linea.textContent = t("estado.buscando");
   } else if (!estado.ultima) {
-    linea.textContent = "Aún no se ha hecho ninguna búsqueda.";
+    linea.textContent = t("estado.nunca");
   } else if (estado.ultima.errores?.length) {
     linea.classList.add("mal");
-    linea.textContent = `La última búsqueda tuvo fallos: ${estado.ultima.errores[0]}`;
+    linea.textContent = t("estado.fallos", estado.ultima.errores[0]);
   } else {
     const [dia, hora] = estado.ultima.cuando.split("T");
-    linea.textContent = `Última búsqueda: ${fechaCorta(dia)} a las ${hora}, ${estado.ultima.hallazgos} viajes vistos.`;
+    linea.textContent = t("estado.ultima", fechaCorta(dia), hora, estado.ultima.hallazgos);
   }
 }
 
@@ -683,7 +970,8 @@ async function seguirBusqueda() {
   const estado = await pedir("/api/estado");
   pintarEstado(estado);
   if (estado.buscando) return setTimeout(seguirBusqueda, 2000);
-  E.recomendaciones = await pedir("/api/recomendaciones");
+  E.recomendaciones = leerRecomendaciones(await pedir("/api/recomendaciones"));
+  limitarFechasFiltro();
   pintarRecomendaciones();
 }
 
@@ -715,9 +1003,9 @@ async function iniciar() {
   ]);
   E.paises = catalogo.paises;
   E.porIso = new Map(catalogo.paises.map((p) => [p.iso, p]));
-  for (const p of catalogo.paises) for (const c of p.ciudades) E.lugares.set(c.iata, { ciudad: c.ciudad, pais: p.iso });
+  for (const p of catalogo.paises) for (const c of p.ciudades) E.lugares.set(c.iata, { ...c, pais: p.iso });
   E.intereses = intereses;
-  E.recomendaciones = recomendaciones;
+  E.recomendaciones = leerRecomendaciones(recomendaciones);
 
   $("consulta").addEventListener("input", (e) => {
     E.consulta = e.target.value;
@@ -745,6 +1033,8 @@ async function iniciar() {
     await guardar(conPais(ficha.iso, null)).catch(avisarError);
     $("ficha").close();
   });
+  prepararFiltros();
+  limitarFechasFiltro();
 
   pintarTodo();
   pintarRecomendaciones();
@@ -754,8 +1044,16 @@ async function iniciar() {
   E.mapa.pintar();
 }
 
+// El idioma y el tema van antes de pedir nada, para que la espera ya salga bien.
+E.idioma = TEXTOS[leerPreferencia("idioma")] ? leerPreferencia("idioma") : "es";
+pintarTextosFijos();
+pintarTema();
+$("tema").addEventListener("click", cambiarTema);
+temaSistema.addEventListener("change", pintarTema);
+for (const boton of document.querySelectorAll("[data-idioma]")) {
+  boton.addEventListener("click", () => cambiarIdioma(boton.dataset.idioma));
+}
+
 iniciar().catch((error) => {
-  document.body.prepend(
-    el("p", { class: "error", role: "alert" }, `No he podido cargar el panel: ${error.message}`),
-  );
+  document.body.prepend(el("p", { class: "error", role: "alert" }, t("error.carga", error.message)));
 });

@@ -115,23 +115,45 @@ def test_plan_exploracion_descarta_ventanas_pasadas():
     assert all(desde > HOY for desde, *_ in plan)
 
 
-def test_plan_google_solo_ciudades_marcadas_sin_ryanair():
+def test_plan_google_llena_los_huecos_que_ryanair_no_cubre():
     inter = intereses(
         {"JP": {"ciudades": ["NRT"], "noches": [10, 14]}, "AT": {"ciudades": ["VIE"]}},
-        consultas_google=4,
+        consultas_google=10,
     )
-    plan = agente.plan_google(inter, CATALOGO, HOY, agente.periodos(HOY, 4), cursor=0)
-    assert len(plan) == 4
+    periodos = agente.periodos(HOY, 4)
+    cubiertos = {("VIE", p.id) for p in periodos}
+    plan = agente.plan_google(inter, CATALOGO, HOY, periodos, 0, cubiertos)
+    # Octubre solo deja hueco desde el día 27 (antelación de dos semanas): cabe.
+    assert sorted(ida.strftime("%Y-%m") for _, ida, _ in plan) == [p.id for p in periodos]
     assert {destino for destino, _, _ in plan} == {"NRT"}
     assert all((vuelta - ida).days == 12 for _, ida, vuelta in plan)
     assert all((ida - HOY).days >= agente.ANTELACION_GOOGLE for _, ida, _ in plan)
 
+    # Sin Ryanair, Viena también necesita Google.
+    plan = agente.plan_google(inter, CATALOGO, HOY, periodos, 0)
+    assert {destino for destino, _, _ in plan} == {"NRT", "VIE"}
 
-def test_plan_google_respeta_el_tope_y_reparte_entre_ciudades():
-    inter = intereses({"JP": {"ciudades": ["NRT", "KIX"]}}, consultas_google=3)
+
+def test_plan_google_reparte_entre_ciudades_antes_que_entre_meses():
+    inter = intereses({"JP": {"ciudades": ["NRT", "KIX"]}}, consultas_google=2)
     plan = agente.plan_google(inter, CATALOGO, HOY, agente.periodos(HOY, 4), cursor=0)
-    assert len(plan) == 3
     assert {destino for destino, _, _ in plan} == {"NRT", "KIX"}
+
+
+def test_plan_google_primero_lo_nunca_visto_y_luego_lo_mas_viejo():
+    inter = intereses({"JP": {"ciudades": ["NRT"]}}, consultas_google=4)
+    periodos = agente.periodos(HOY, 4)  # oct, nov, dic, ene, feb
+    vistos = {("NRT", "2026-11"): "2026-10-10", ("NRT", "2026-12"): "2026-10-01"}
+    meses = lambda plan: sorted(ida.strftime("%Y-%m") for _, ida, _ in plan)
+    assert meses(agente.plan_google(inter, CATALOGO, HOY, periodos, 0, vistos=vistos)) == [
+        "2026-10", "2026-12", "2027-01", "2027-02",
+    ]  # fmt: skip
+
+
+def test_plan_google_pais_sin_ciudades_usa_las_de_ryanair():
+    inter = intereses({"MA": {}}, consultas_google=2)
+    plan = agente.plan_google(inter, CATALOGO, HOY, agente.periodos(HOY, 4), 0)
+    assert {destino for destino, _, _ in plan} == {"AGA", "RAK"}
 
 
 def test_plan_google_cambia_de_fechas_cada_dia():
@@ -166,6 +188,21 @@ def test_percibir_junta_exploracion_y_google():
     assert len(japon) == 1 and japon[0].precio == 700 and japon[0].rango_tipico == (720, 1100)
     assert sum(h.destino == "AGA" for h in informe.hallazgos) == 2  # resto de octubre + noviembre
     assert informe.consultas == 3 and not informe.errores
+
+
+def test_percibir_no_pide_a_google_lo_que_ya_trae_ryanair():
+    inter = intereses({"AT": {}}, meses=1, consultas_google=5)
+    pedidos = []
+
+    def google(origen, destino, ida, vuelta):
+        pedidos.append((destino, ida[:7]))
+        return [], Contexto()
+
+    agente.percibir(
+        inter, CATALOGO, HOY, agente.periodos(HOY, 1), 0,
+        explorar=lambda *a: [viaje("VIE", 90)], ida_vuelta=google, pausa=0,
+    )  # fmt: skip
+    assert pedidos == [("VIE", "2026-10")]  # noviembre ya lo trae Ryanair
 
 
 def test_percibir_deja_de_explorar_tras_dos_fallos():
@@ -261,23 +298,45 @@ def test_como_mucho_tres_chollos_y_uno_por_ciudad():
     assert [c.hallazgo.destino for c in informe.avisos_otros] == ["AGA", "RAK", "VIE"]
 
 
-def test_recomendaciones_por_mes_con_lo_marcado_primero():
+def test_recomendaciones_llevan_lo_mejor_de_cada_destino_y_mes():
     inter = intereses({"AT": {}}, meses=2)
     hallazgos = [
         viaje("AGA", 31),
         viaje("VIE", 144),
         viaje("VIE", 150, ida="2026-11-20", vuelta="2026-11-23"),
         viaje("RAK", 40, ida="2026-12-03", vuelta="2026-12-06"),
+        viaje("RAK", 45, ida="2027-02-03", vuelta="2027-02-06"),  # fuera de los meses que se miran
     ]
     rec = decidir(hallazgos, inter).recomendaciones
     assert [p["id"] for p in rec["periodos"]] == ["2026-10", "2026-11", "2026-12"]
-    noviembre = rec["periodos"][1]["ofertas"]
-    assert [(o["destino"], o["precio"], o["marcado"]) for o in noviembre] == [
-        ("VIE", 144, True),
+    assert [(o["destino"], o["precio"], o["marcado"]) for o in rec["ofertas"]] == [
         ("AGA", 31, False),
+        ("RAK", 40, False),
+        ("VIE", 144, True),
     ]
-    assert noviembre[0]["ciudad"] == "Viena" and "google.com/travel/flights" in noviembre[0]["enlace"]
-    assert rec["periodos"][2]["ofertas"][0]["destino"] == "RAK"
+    vie = rec["ofertas"][2]
+    assert vie["ciudad"] == "Viena" and vie["visto"] == HOY.isoformat()
+    assert "google.com/travel/flights" in vie["enlace"]
+
+
+def test_recomendaciones_completan_lo_marcado_con_lo_ultimo_visto():
+    inter = intereses({"JP": {"ciudades": ["NRT"]}, "AT": {}}, meses=2)
+    anteriores = [
+        agente.Candidato(viaje("NRT", 700), CATALOGO.lugar("NRT"), True, visto="2026-10-11"),
+        agente.Candidato(viaje("VIE", 90), CATALOGO.lugar("VIE"), True, visto="2026-10-12"),
+    ]
+    informe = agente.Informe(hallazgos=[viaje("VIE", 144)])
+    agente.decidir(
+        informe, inter, CATALOGO, HOY, agente.periodos(HOY, 2), {}, {}, anteriores
+    )
+    ofertas = informe.recomendaciones["ofertas"]
+    # Viena tiene precio hoy: el de anteayer, aunque más barato, ya no vale.
+    assert [(o["destino"], o["precio"], o["visto"]) for o in ofertas] == [
+        ("VIE", 144, "2026-10-13"),
+        ("NRT", 700, "2026-10-11"),
+    ]
+    # Lo visto otros días no avisa: solo sirve para el panel.
+    assert "NRT" not in {c.hallazgo.destino for c in informe.avisos_marcados + informe.presentacion}
 
 
 # ---- recordar ----
@@ -292,6 +351,25 @@ def test_precio_habitual_necesita_dias_suficientes(tmp_path):
     habituales = agente.precios_habituales(date(2026, 10, 13), csv)
     assert habituales == {("VIE", "2026-11"): 100}
     assert agente.precios_habituales(date(2026, 10, 13), tmp_path / "no_existe.csv") == {}
+
+
+def test_ultimos_vistos_solo_lo_marcado_futuro_y_del_ultimo_dia(tmp_path):
+    csv = tmp_path / "ofertas.csv"
+    inter = intereses({"JP": {"ciudades": ["NRT"], "noches": [10, 14]}, "AT": {}})
+    nrt = dict(ida="2027-01-10", vuelta="2027-01-22")
+    agente.guardar_hallazgos([viaje("NRT", 650, **nrt)], date(2026, 10, 9), csv)
+    agente.guardar_hallazgos([viaje("NRT", 720, **nrt), viaje("NRT", 700, **nrt)], date(2026, 10, 11), csv)
+    agente.guardar_hallazgos([viaje("NRT", 500, **nrt)], date(2026, 9, 1), csv)  # demasiado viejo
+    agente.guardar_hallazgos([viaje("NRT", 400, ida="2027-01-10", vuelta="2027-01-13")], date(2026, 10, 12), csv)  # noches
+    agente.guardar_hallazgos([viaje("VIE", 30, ida="2026-10-12", vuelta="2026-10-15")], date(2026, 10, 10), csv)  # ya pasó
+    agente.guardar_hallazgos([viaje("AGA", 20)], date(2026, 10, 12), csv)  # no marcado
+    agente.guardar_hallazgos([viaje("VIE", 99)], HOY, csv)  # lo de hoy va por otro lado
+
+    vistos = agente.ultimos_vistos(inter, CATALOGO, HOY, csv)
+    assert [(c.hallazgo.destino, c.hallazgo.precio, c.visto, c.marcado) for c in vistos] == [
+        ("NRT", 700, "2026-10-11", True)
+    ]
+    assert agente.ultimos_vistos(inter, CATALOGO, HOY, tmp_path / "no_existe.csv") == []
 
 
 # ---- actuar ----
