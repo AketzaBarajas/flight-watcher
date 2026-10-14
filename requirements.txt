@@ -1,0 +1,8 @@
+# Versión fijada: el parseo depende de cómo esta versión construye la búsqueda.
+fast-flights==3.1.0
+# fast-flights 3.1.0 lo usa pero no lo declara como dependencia.
+typing_extensions
+PyYAML>=6.0
+# Icono de la bandeja del sistema
+pystray>=0.19
+Pillow>=10

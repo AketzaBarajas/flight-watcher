@@ -1,0 +1,34 @@
+# Vigilante de vuelos · configuración
+# Copia este fichero como config.yaml (que no se sube al repo) y cambia la lista `trayectos`.
+
+fuente: google_flights
+moneda: EUR
+adultos: 1          # precio por persona; con 2+ Google puede dar otra tarifa
+
+filtros:            # se aplican a todos los trayectos (cada uno puede pisarlos)
+  max_escalas: 0    # 0 = solo directos · 1 = hasta una escala · null = cualquiera
+  duracion_max_horas: null
+
+alerta:
+  bajada_pct: 15    # avisar si está un 15 % por debajo de la media de los últimos días
+  dias_media: 7
+
+avisos:
+  canales: [ntfy]           # consola · ntfy · email (se pueden combinar)
+  resumen_semanal: lunes    # ese día manda los precios aunque no haya chollo, para
+                            # saber que sigue vivo. null para desactivarlo.
+
+trayectos:
+  # Ejemplo: cópialo como config.yaml y pon tus trayectos.
+  # Varias fechas en un trayecto = flexibilidad de días.
+  - nombre: Madrid → Lisboa
+    origen: MAD
+    destino: LIS
+    fechas: [2027-03-12, 2027-03-13]
+    precio_max: 60
+
+  - nombre: Lisboa → Madrid
+    origen: LIS
+    destino: MAD
+    fechas: [2027-03-15]
+    precio_max: 60

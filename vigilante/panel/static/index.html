@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vigilante de vuelos</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23FFD21F'/%3E%3Cpath d='M6 18l20-9-7 16-3-6z' fill='%2310233A'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+
+<header class="barra">
+  <h1>Vigilante de vuelos</h1>
+  <label class="origen">Salgo de
+    <input id="origen" type="text" maxlength="3" autocomplete="off" spellcheck="false" aria-describedby="origen-ciudad">
+    <span id="origen-ciudad"></span>
+  </label>
+  <p id="estado" class="estado" role="status"></p>
+  <button id="abrir-ajustes" class="boton secundario" type="button">Ajustes</button>
+  <button id="buscar" class="boton" type="button">Buscar vuelos ahora</button>
+</header>
+
+<section class="mapa" aria-labelledby="mapa-titulo">
+  <h2 id="mapa-titulo" class="solo-lectores">Mapa de países marcados</h2>
+  <svg id="mapa" viewBox="0 0 960 470" role="img" aria-label="Mapa del mundo"></svg>
+  <div id="globo" class="globo" hidden></div>
+  <div class="mapa-pie">
+    <p class="leyenda"><span class="muestra" aria-hidden="true"></span><span id="leyenda-texto"></span></p>
+    <div class="zoom" role="group" aria-label="Zoom del mapa">
+      <button type="button" data-zoom="alejar" aria-label="Alejar">−</button>
+      <button type="button" data-zoom="acercar" aria-label="Acercar">+</button>
+      <button type="button" data-zoom="todo">Ver todo</button>
+    </div>
+  </div>
+</section>
+
+<main class="cuerpo">
+  <section class="mios" aria-labelledby="mios-titulo">
+    <h2 id="mios-titulo">Mis destinos</h2>
+    <ul id="lista-mios" class="filas"></ul>
+    <nav id="paginas-mios" class="paginas" aria-label="Páginas de mis destinos"></nav>
+  </section>
+
+  <section class="buscador" aria-labelledby="buscador-titulo">
+    <h2 id="buscador-titulo">Buscar destino</h2>
+    <input id="consulta" type="search" placeholder="País, ciudad o código de aeropuerto" autocomplete="off" aria-label="Buscar país o ciudad">
+    <label class="casilla">
+      <input id="con-visado" type="checkbox">
+      Mostrar también los países que exigen visado previo
+    </label>
+    <ul id="resultados" class="filas"></ul>
+    <nav id="paginas-resultados" class="paginas" aria-label="Páginas de resultados"></nav>
+  </section>
+</main>
+
+<section class="recomendaciones" aria-labelledby="rec-titulo">
+  <h2 id="rec-titulo">Viajes baratos para los próximos meses</h2>
+  <div id="meses" class="meses" role="tablist" aria-label="Mes de salida"></div>
+  <div id="ofertas" role="tabpanel"></div>
+  <p id="rec-nota" class="nota"></p>
+</section>
+
+<dialog id="ficha" aria-labelledby="ficha-titulo">
+  <form id="ficha-form" method="dialog">
+    <header>
+      <h2 id="ficha-titulo"></h2>
+      <p id="ficha-entrada" class="entrada"></p>
+    </header>
+
+    <div id="ficha-campos">
+      <fieldset>
+        <legend>Ciudades</legend>
+        <p id="ficha-ciudades-ayuda" class="ayuda"></p>
+        <input id="ficha-filtro" type="search" placeholder="Filtrar ciudades" aria-label="Filtrar ciudades">
+        <ul id="ficha-ciudades" class="ciudades"></ul>
+      </fieldset>
+
+      <fieldset>
+        <legend>Fechas de salida</legend>
+        <p class="ayuda">Sin fechas, vale cualquier día de los próximos meses.</p>
+        <ul id="ficha-ventanas" class="ventanas"></ul>
+        <button id="ficha-nueva-ventana" class="boton secundario" type="button">Añadir fechas</button>
+      </fieldset>
+
+      <fieldset class="en-linea">
+        <legend>Precio y duración</legend>
+        <label>Avísame por debajo de
+          <span class="con-unidad"><input id="ficha-precio" type="number" min="1" step="1" inputmode="numeric"> € ida y vuelta</span>
+        </label>
+        <label>Noches
+          <span class="con-unidad">
+            <input id="ficha-noches-min" type="number" min="1" max="60" aria-label="Noches mínimas"> a
+            <input id="ficha-noches-max" type="number" min="1" max="60" aria-label="Noches máximas">
+          </span>
+        </label>
+      </fieldset>
+    </div>
+
+    <p id="ficha-error" class="error" role="alert" hidden></p>
+    <footer>
+      <button id="ficha-quitar" class="boton peligro" type="button">Quitar de mis destinos</button>
+      <span class="hueco"></span>
+      <button id="ficha-cancelar" class="boton secundario" type="button">Cancelar</button>
+      <button id="ficha-guardar" class="boton" type="submit"></button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog id="ajustes" aria-labelledby="ajustes-titulo">
+  <form id="ajustes-form" method="dialog">
+    <header><h2 id="ajustes-titulo">Ajustes</h2></header>
+    <div class="campos">
+      <label>Meses que miro hacia delante
+        <input id="aj-meses" type="number" min="1" max="10" required>
+      </label>
+      <label>Noches de un viaje normal
+        <span class="con-unidad">
+          <input id="aj-noches-min" type="number" min="1" max="30" required aria-label="Noches mínimas"> a
+          <input id="aj-noches-max" type="number" min="1" max="30" required aria-label="Noches máximas">
+        </span>
+      </label>
+      <label>Chollo fuera de mi lista
+        <span class="con-unidad"><input id="aj-chollo" type="number" min="1" max="5000" required> € ida y vuelta</span>
+        <span class="ayuda">Un destino que no has marcado te llega si baja de este precio, o si cae un 35 % respecto a lo que suele costar. El mínimo de Ryanair ronda los 30 €: por encima de eso llegarán avisos casi a diario.</span>
+      </label>
+      <label>Consultas diarias a Google
+        <input id="aj-google" type="number" min="0" max="20" required>
+        <span class="ayuda">Para las ciudades marcadas a las que Ryanair no vuela. Cada consulta mira una fecha, así que con más ciudades marcadas cada una se revisa menos a menudo.</span>
+      </label>
+    </div>
+    <p id="ajustes-error" class="error" role="alert" hidden></p>
+    <footer>
+      <span class="hueco"></span>
+      <button id="ajustes-cancelar" class="boton secundario" type="button">Cancelar</button>
+      <button class="boton" type="submit">Guardar ajustes</button>
+    </footer>
+  </form>
+</dialog>
+
+<script src="vendor/d3.min.js"></script>
+<script src="vendor/topojson-client.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
