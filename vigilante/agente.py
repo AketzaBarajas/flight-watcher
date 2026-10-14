@@ -28,7 +28,7 @@ from . import intereses as mod_intereses
 from .catalogo import Catalogo, Lugar
 from .config import RAIZ
 from .fuentes import google_flights, ryanair
-from .intereses import Intereses
+from .intereses import Interes, Intereses
 from .modelos import Hallazgo
 
 CSV_OFERTAS = RAIZ / "data" / "ofertas.csv"
@@ -50,7 +50,6 @@ DIAS_PARA_REPETIR = 21  # ...o han pasado tres semanas
 MAX_AVISOS_MARCADOS = 6
 MAX_AVISOS_OTROS = 3
 MAX_PRESENTACION = 8
-RECOMENDACIONES_POR_MES = 12
 
 MESES = [
     "enero", "febrero", "marzo", "abril", "mayo", "junio",
@@ -72,6 +71,7 @@ class Candidato:
     lugar: Lugar
     marcado: bool
     motivos: tuple[str, ...] = ()
+    visto: str | None = None  # día de la búsqueda, si no es la de hoy
 
     @property
     def clave(self) -> str:
@@ -148,64 +148,78 @@ def plan_exploracion(
     return plan[:MAX_EXPLORACIONES]
 
 
+def ciudades_marcadas(intereses: Intereses, catalogo: Catalogo) -> list[tuple[Interes, list[str]]]:
+    """Cada ciudad marcada con sus aeropuertos, el principal primero (Londres: LHR, LGW...).
+
+    Un país sin ciudades elegidas cuenta con las suyas a las que vuela Ryanair,
+    igual que en el panel.
+    """
+    grupos: dict[tuple[str, str], tuple[Interes, list[str]]] = {}
+    for iso, interes in intereses.paises.items():
+        for c in catalogo.paises[iso]["ciudades"]:  # el catálogo pone primero las grandes
+            elegida = c["iata"] in interes.ciudades if interes.ciudades else c.get("ry")
+            if elegida:
+                grupos.setdefault((iso, c["ciudad"]), (interes, []))[1].append(c["iata"])
+    return list(grupos.values())
+
+
 def plan_google(
     intereses: Intereses,
     catalogo: Catalogo,
     hoy: date,
     lista_periodos: list[Periodo],
     cursor: int,
+    cubiertos: set[tuple[str, str]] | None = None,
+    vistos: dict[tuple[str, str], str] | None = None,
 ) -> list[tuple[str, date, date]]:
-    """Viajes (destino, ida, vuelta) que muestrear hoy en Google.
+    """Viajes (destino, ida, vuelta) que consultar hoy en Google.
 
-    Solo para ciudades marcadas a las que Ryanair no vuela. Como cada consulta
-    es una fecha concreta, se reparte el tope diario entre las ciudades y el
-    `cursor` (que avanza cada día) hace que con el tiempo se cubran todas las fechas.
+    Cada ciudad marcada y mes es un hueco que llenar, para que el panel tenga
+    precio de todas en todos los meses. Lo que hoy ya trae Ryanair (`cubiertos`,
+    pares destino y mes) no hace falta. Del resto van primero los huecos que
+    nunca se han visto y después los que llevan más tiempo sin mirarse (`vistos`:
+    último día con precio de cada destino y mes), hasta el tope diario. Cada
+    consulta es una fecha del mes, y el `cursor` (que avanza cada día) va
+    cambiando la fecha y, a igual antigüedad, qué hueco va antes.
     """
     if intereses.consultas_google <= 0:
         return []
+    cubiertos, vistos = cubiertos or set(), vistos or {}
     primer_dia = hoy + timedelta(days=ANTELACION_GOOGLE)
-    ultimo_dia = min(
-        lista_periodos[-1].hasta if lista_periodos else hoy, hoy + timedelta(days=HORIZONTE_DIAS)
-    )
+    ultimo_dia = hoy + timedelta(days=HORIZONTE_DIAS)
 
-    por_ciudad: list[tuple[str, list[date], int]] = []
-    for interes in intereses.paises.values():
+    # (último visto, vuelta, puesto, destino, días, noches). A igual antigüedad se
+    # va por vueltas: un mes de cada ciudad, luego otro... para que todas tengan
+    # algún precio cuanto antes. Cada ciudad empieza por un mes distinto y el
+    # cursor lo va rotando, igual que la ciudad con que se empieza.
+    huecos: list[tuple[str, int, int, str, list[date], int]] = []
+    ciudades = ciudades_marcadas(intereses, catalogo)
+    for k, (interes, aeropuertos) in enumerate(ciudades):
         noches_min, noches_max = intereses.noches_de(interes)
-        noches = (noches_min + noches_max) // 2
-        rangos = [(v.desde, v.hasta) for v in interes.ventanas] or [(primer_dia, ultimo_dia)]
-        dias = sorted(
-            {
+        de_la_ciudad = []
+        for p in lista_periodos:
+            if any((iata, p.id) in cubiertos for iata in aeropuertos):
+                continue
+            desde, hasta = max(p.desde, primer_dia), min(p.hasta, ultimo_dia)
+            dias = [
                 desde + timedelta(days=i)
-                for desde, hasta in rangos
-                for i in range((min(hasta, hoy + timedelta(days=HORIZONTE_DIAS)) - desde).days + 1)
-                if desde + timedelta(days=i) >= primer_dia
-            }
-        )
-        if not dias:
-            continue
-        for iata in sorted(interes.ciudades):
-            lugar = catalogo.lugar(iata)
-            if lugar and not lugar.ryanair:
-                por_ciudad.append((iata, dias, noches))
+                for i in range((hasta - desde).days + 1)
+                if not interes.ventanas
+                or any(v.contiene(desde + timedelta(days=i)) for v in interes.ventanas)
+            ]
+            if dias:
+                visto = max(vistos.get((iata, p.id), "") for iata in aeropuertos)
+                de_la_ciudad.append((visto, dias))
+        m = len(de_la_ciudad)
+        for j, (visto, dias) in enumerate(de_la_ciudad):
+            puesto = (k - cursor) % len(ciudades)
+            noches = (noches_min + noches_max) // 2
+            huecos.append((visto, (j - cursor - k) % m, puesto, aeropuertos[0], dias, noches))
 
-    plan: list[tuple[str, date, date]] = []
-    ronda = 0
-    while por_ciudad and len(plan) < intereses.consultas_google:
-        anadidos = 0
-        # El cursor también rota por qué ciudad se empieza, para que el tope no
-        # deje siempre fuera a las mismas.
-        orden = por_ciudad[cursor % len(por_ciudad) :] + por_ciudad[: cursor % len(por_ciudad)]
-        for iata, dias, noches in orden:
-            if len(plan) >= intereses.consultas_google:
-                break
-            ida = dias[((cursor + ronda) * _paso(len(dias))) % len(dias)]
-            viaje = (iata, ida, ida + timedelta(days=noches))
-            if viaje not in plan:
-                plan.append(viaje)
-                anadidos += 1
-        if not anadidos:
-            break
-        ronda += 1
+    plan = []
+    for _, _, puesto, destino, dias, noches in sorted(huecos)[: intereses.consultas_google]:
+        ida = dias[((cursor + puesto) * _paso(len(dias))) % len(dias)]
+        plan.append((destino, ida, ida + timedelta(days=noches)))
     return plan
 
 
@@ -226,7 +240,9 @@ def percibir(
     explorar: Callable = ryanair.explorar,
     ida_vuelta: Callable = google_flights.consultar_ida_vuelta,
     pausa: float = 1.0,
+    vistos: dict[tuple[str, str], str] | None = None,
 ) -> Informe:
+    """Primero Ryanair; después Google para los huecos marcados que Ryanair no ha llenado."""
     informe = Informe()
 
     fallos_seguidos = 0
@@ -244,7 +260,15 @@ def percibir(
                 informe.errores.append("Ryanair: dos fallos seguidos, dejo de explorar por hoy")
                 break
 
-    for destino, ida, vuelta in plan_google(intereses, catalogo, hoy, lista_periodos, cursor):
+    cubiertos = set()
+    for h in informe.hallazgos:
+        lugar = catalogo.lugar(h.destino)
+        ida, vuelta = date.fromisoformat(h.ida), date.fromisoformat(h.vuelta)
+        if lugar and intereses.interes_de(lugar.pais, h.destino, ida, (vuelta - ida).days):
+            cubiertos.add((h.destino, h.mes))
+
+    plan = plan_google(intereses, catalogo, hoy, lista_periodos, cursor, cubiertos, vistos)
+    for destino, ida, vuelta in plan:
         time.sleep(pausa * 2)
         informe.consultas += 1
         try:
@@ -315,6 +339,47 @@ def precios_habituales(hoy: date, ruta: Path | None = None) -> dict[tuple[str, s
     }
 
 
+def ultimos_vistos(
+    intereses: Intereses,
+    catalogo: Catalogo,
+    hoy: date,
+    ruta: Path | None = None,
+) -> list[Candidato]:
+    """Lo último que se vio de cada destino marcado y mes en los días anteriores a hoy.
+
+    Google solo mira unas pocas fechas al día, así que muchos destinos marcados
+    no tienen precio en la búsqueda de hoy; el panel enseña entonces este, con
+    el día en que se vio, por viejo que sea. Cuenta solo el día más reciente:
+    un mínimo de hace semanas no dice nada del precio de ahora.
+    """
+    ruta = ruta or CSV_OFERTAS
+    if not ruta.exists():
+        return []
+    ultimos: dict[tuple[str, str], tuple[str, Hallazgo]] = {}
+    with ruta.open(newline="", encoding="utf-8") as f:
+        for fila in csv.DictReader(f):
+            dia = fila["consultado"]
+            if fila["origen"] != intereses.origen or date.fromisoformat(dia) >= hoy:
+                continue
+            ida, vuelta = date.fromisoformat(fila["ida"]), date.fromisoformat(fila["vuelta"])
+            lugar = catalogo.lugar(fila["destino"])
+            if ida <= hoy or lugar is None:
+                continue
+            if intereses.interes_de(lugar.pais, lugar.iata, ida, (vuelta - ida).days) is None:
+                continue
+            h = Hallazgo(
+                fila["origen"], fila["destino"], fila["ida"], fila["vuelta"],
+                float(fila["precio"]), fila["aerolinea"], fila["fuente"],
+            )  # fmt: skip
+            actual = ultimos.get((h.destino, h.mes))
+            if actual is None or (dia, -h.precio) > (actual[0], -actual[1].precio):
+                ultimos[(h.destino, h.mes)] = (dia, h)
+    return [
+        Candidato(h, catalogo.lugar(h.destino), marcado=True, visto=dia)
+        for dia, h in ultimos.values()
+    ]
+
+
 # ------------------------------------------------------------------- decidir
 
 
@@ -326,8 +391,12 @@ def decidir(
     lista_periodos: list[Periodo],
     habituales: dict[tuple[str, str], float],
     estado: dict,
+    anteriores: list[Candidato] | None = None,
 ) -> None:
-    """Rellena en el informe los avisos y las recomendaciones a partir de los hallazgos."""
+    """Rellena en el informe los avisos y las recomendaciones a partir de los hallazgos.
+
+    `anteriores` (ver `ultimos_vistos`) solo se usa en las recomendaciones del panel.
+    """
     # El mejor precio de cada destino y mes, separado por si cubre un interés o no.
     mejores: dict[tuple[str, str, bool], Candidato] = {}
     for h in informe.hallazgos:
@@ -368,7 +437,9 @@ def decidir(
             informe.presentacion.append(c)
     informe.presentacion = informe.presentacion[:MAX_PRESENTACION]
 
-    informe.recomendaciones = _recomendaciones(candidatos, intereses, lista_periodos, hoy)
+    informe.recomendaciones = _recomendaciones(
+        candidatos, anteriores or [], intereses, lista_periodos, hoy
+    )
 
 
 def _motivos(
@@ -407,38 +478,35 @@ def _es_novedad(c: Candidato, avisadas: dict, hoy: date) -> bool:
 
 
 def _recomendaciones(
-    candidatos: list[Candidato], intereses: Intereses, lista_periodos: list[Periodo], hoy: date
+    candidatos: list[Candidato],
+    anteriores: list[Candidato],
+    intereses: Intereses,
+    lista_periodos: list[Periodo],
+    hoy: date,
 ) -> dict:
-    salida = []
-    for p in lista_periodos:
-        # Por destino, la versión marcada gana a la no marcada; después, el precio.
-        por_destino: dict[str, Candidato] = {}
-        for c in candidatos:
-            if c.hallazgo.mes != p.id:
-                continue
-            actual = por_destino.get(c.hallazgo.destino)
-            if actual is None or (c.marcado, -c.hallazgo.precio) > (
-                actual.marcado,
-                -actual.hallazgo.precio,
-            ):
-                por_destino[c.hallazgo.destino] = c
-        orden = sorted(por_destino.values(), key=lambda c: (not c.marcado, c.hallazgo.precio))
-        salida.append(
-            {
-                "id": p.id,
-                "etiqueta": p.etiqueta,
-                "ofertas": [_a_json(c) for c in orden[:RECOMENDACIONES_POR_MES]],
-            }
-        )
+    """Todo lo de hoy (lo mejor de cada destino y mes) para que el panel filtre y agrupe.
+
+    Un destino marcado sin precio hoy en un mes lleva lo último que se vio de él.
+    """
+    meses = {p.id for p in lista_periodos}
+    ofertas = [c for c in candidatos if c.hallazgo.mes in meses]
+    de_hoy = {(c.hallazgo.destino, c.hallazgo.mes) for c in ofertas if c.marcado}
+    ofertas += [
+        c
+        for c in anteriores
+        if c.hallazgo.mes in meses and (c.hallazgo.destino, c.hallazgo.mes) not in de_hoy
+    ]
+    ofertas.sort(key=lambda c: (c.hallazgo.precio, c.hallazgo.ida))
     return {
         "generado": datetime.now().isoformat(timespec="minutes"),
         "dia": hoy.isoformat(),
         "origen": intereses.origen,
-        "periodos": salida,
+        "periodos": [{"id": p.id, "etiqueta": p.etiqueta} for p in lista_periodos],
+        "ofertas": [_a_json(c, hoy) for c in ofertas],
     }
 
 
-def _a_json(c: Candidato) -> dict:
+def _a_json(c: Candidato, hoy: date) -> dict:
     h = c.hallazgo
     return {
         "destino": h.destino,
@@ -451,6 +519,7 @@ def _a_json(c: Candidato) -> dict:
         "aerolinea": h.aerolinea,
         "marcado": c.marcado,
         "motivos": list(c.motivos),
+        "visto": c.visto or hoy.isoformat(),
         "enlace": enlace(h),
     }
 
@@ -511,10 +580,15 @@ def correr(canales: tuple[str, ...], dry_run: bool = False, hoy: date | None = N
     estado = estado_total.setdefault("agente", {})
     lista_periodos = periodos(hoy, intereses.meses)
 
-    informe = percibir(intereses, catalogo, hoy, lista_periodos, estado.get("cursor", 0))
-    decidir(
-        informe, intereses, catalogo, hoy, lista_periodos, precios_habituales(hoy), estado
+    anteriores = ultimos_vistos(intereses, catalogo, hoy)
+    vistos = {(c.hallazgo.destino, c.hallazgo.mes): c.visto for c in anteriores}
+    informe = percibir(
+        intereses, catalogo, hoy, lista_periodos, estado.get("cursor", 0), vistos=vistos
     )
+    decidir(
+        informe, intereses, catalogo, hoy, lista_periodos, precios_habituales(hoy), estado,
+        anteriores,
+    )  # fmt: skip
     if dry_run:
         return informe
 

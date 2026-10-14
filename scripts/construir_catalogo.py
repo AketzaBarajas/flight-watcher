@@ -10,7 +10,8 @@ Uso (necesita `pip install babel pycountry`, que no son dependencias del program
 La carpeta debe contener:
     airports.csv            https://davidmegginson.github.io/ourairports-data/airports.csv
     passport.csv            https://raw.githubusercontent.com/ilyankou/passport-index-dataset/master/passport-index-tidy-iso2.csv
-    ryanair_airports.json   https://www.ryanair.com/api/views/locate/5/airports/es/active
+    ryanair_airports.json     https://www.ryanair.com/api/views/locate/5/airports/es/active
+    ryanair_airports_en.json  https://www.ryanair.com/api/views/locate/5/airports/en/active
 """
 
 import csv
@@ -18,9 +19,6 @@ import json
 import sys
 from datetime import date
 from pathlib import Path
-
-import pycountry
-from babel import Locale
 
 SALIDA = Path(__file__).resolve().parent.parent / "vigilante" / "panel" / "datos" / "catalogo.json"
 PASAPORTE = "ES"
@@ -72,6 +70,34 @@ CIUDADES_ES = {
     "SYD": "Sídney", "MEL": "Melbourne", "AKL": "Auckland", "PPT": "Tahití", "NAN": "Fiyi",
 }  # fmt: skip
 
+# Nombre en inglés de los anteriores, para el panel en inglés (los que cambian).
+CIUDADES_EN = {
+    "AMS": "Amsterdam", "MUC": "Munich", "ZRH": "Zurich", "MXP": "Milan", "LIN": "Milan",
+    "PVG": "Shanghai", "SHA": "Shanghai", "ICN": "Seoul", "GMP": "Seoul", "HAN": "Hanoi",
+    "TPE": "Taipei", "DXB": "Dubai", "GYD": "Baku", "ZNZ": "Zanzibar", "LAX": "Los Angeles",
+    "CUN": "Cancun", "GIG": "Rio de Janeiro", "PPT": "Tahiti",
+    "LHR": "London", "LGW": "London", "LCY": "London", "CDG": "Paris", "ORY": "Paris",
+    "FRA": "Frankfurt", "GVA": "Geneva", "FCO": "Rome", "ATH": "Athens", "KEF": "Reykjavik",
+    "SVO": "Moscow", "DME": "Moscow", "LED": "Saint Petersburg", "KBP": "Kyiv",
+    "ARN": "Stockholm", "CPH": "Copenhagen", "WAW": "Warsaw", "LIS": "Lisbon",
+    "BRU": "Brussels", "VIE": "Vienna", "PRG": "Prague", "IST": "Istanbul", "SAW": "Istanbul",
+    "NRT": "Tokyo", "HND": "Tokyo", "PEK": "Beijing", "PKX": "Beijing", "CAN": "Guangzhou",
+    "SIN": "Singapore", "CGK": "Jakarta", "SGN": "Ho Chi Minh City", "DEL": "New Delhi",
+    "BOM": "Mumbai", "KTM": "Kathmandu", "AUH": "Abu Dhabi", "RUH": "Riyadh", "JED": "Jeddah",
+    "TBS": "Tbilisi", "EVN": "Yerevan", "TAS": "Tashkent", "CAI": "Cairo", "HRG": "Hurghada",
+    "SSH": "Sharm El Sheikh", "TUN": "Tunis", "ALG": "Algiers", "JNB": "Johannesburg",
+    "CPT": "Cape Town", "ADD": "Addis Ababa", "MRU": "Mauritius", "ACC": "Accra",
+    "JFK": "New York", "EWR": "New York", "LGA": "New York", "MEX": "Mexico City",
+    "HAV": "Havana", "PTY": "Panama City", "CTG": "Cartagena", "CUZ": "Cusco",
+    "SCL": "Santiago", "SSA": "Salvador", "SYD": "Sydney", "NAN": "Fiji",
+}  # fmt: skip
+
+
+def nombre_en(iata: str, ciudad: str, ryanair_en: dict[str, str]) -> str | None:
+    """El nombre en inglés de la ciudad, o None si es el mismo que en español."""
+    en = CIUDADES_EN.get(iata) or ryanair_en.get(iata)
+    return en if en and en != ciudad else None
+
 
 def requisito(valor: str | None) -> dict:
     """Traduce el valor del dataset de pasaportes a una categoría propia."""
@@ -103,6 +129,9 @@ def centro(puntos: list[tuple]) -> list[float]:
 
 
 def main(carpeta: Path) -> None:
+    import pycountry  # solo hacen falta aquí, no para importar las funciones de arriba
+    from babel import Locale
+
     territorios = Locale("es").territories
 
     entrada = {}
@@ -111,10 +140,13 @@ def main(carpeta: Path) -> None:
             if fila["Passport"] == PASAPORTE:
                 entrada[fila["Destination"]] = fila["Requirement"]
 
-    ryanair = {
-        a["code"]: a["city"]["name"]
-        for a in json.loads((carpeta / "ryanair_airports.json").read_text(encoding="utf-8"))
-    }
+    ryanair, ryanair_en = (
+        {
+            a["code"]: a["city"]["name"]
+            for a in json.loads((carpeta / nombre).read_text(encoding="utf-8"))
+        }
+        for nombre in ("ryanair_airports.json", "ryanair_airports_en.json")
+    )
 
     ciudades: dict[str, list[dict]] = {}
     coordenadas: dict[str, list[tuple]] = {}
@@ -135,6 +167,8 @@ def main(carpeta: Path) -> None:
                 "aeropuerto": a["name"].strip(),
                 "tam": TAMANOS[a["type"]],
             }
+            if en := nombre_en(iata, ciudad, ryanair_en):
+                aeropuerto["en"] = en
             if iata in ryanair:
                 aeropuerto["ry"] = True
             ciudades.setdefault(a["iso_country"], []).append(aeropuerto)
@@ -167,7 +201,7 @@ def main(carpeta: Path) -> None:
         "fuentes": {
             "aeropuertos": "OurAirports (dominio público): aeropuertos con servicio regular y código IATA",
             "entrada": "passport-index-dataset de ilyankou (datos de Passport Index, feb-2026). Orientativo",
-            "nombres_ryanair": "Nombres de ciudad en español de los aeropuertos donde opera Ryanair",
+            "nombres_ryanair": "Nombres de ciudad en español e inglés de los aeropuertos donde opera Ryanair",
         },
         "paises": paises,
     }

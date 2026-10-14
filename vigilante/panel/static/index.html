@@ -5,31 +5,46 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Vigilante de vuelos</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23FFD21F'/%3E%3Cpath d='M6 18l20-9-7 16-3-6z' fill='%2310233A'/%3E%3C/svg%3E">
+  <script>
+    // Antes de pintar nada, para que no parpadee el tema contrario.
+    try {
+      const tema = localStorage.getItem("tema");
+      if (tema === "light" || tema === "dark") document.documentElement.dataset.theme = tema;
+    } catch (e) {}
+  </script>
   <link rel="stylesheet" href="estilos.css">
 </head>
 <body>
 
 <header class="barra">
-  <h1>Vigilante de vuelos</h1>
-  <label class="origen">Salgo de
+  <h1 data-i18n="titulo">Vigilante de vuelos</h1>
+  <label class="origen"><span data-i18n="origen">Salgo de</span>
     <input id="origen" type="text" maxlength="3" autocomplete="off" spellcheck="false" aria-describedby="origen-ciudad">
     <span id="origen-ciudad"></span>
   </label>
   <p id="estado" class="estado" role="status"></p>
-  <button id="abrir-ajustes" class="boton secundario" type="button">Ajustes</button>
-  <button id="buscar" class="boton" type="button">Buscar vuelos ahora</button>
+  <div class="idioma" role="group" aria-label="Idioma" data-i18n-aria-label="idioma.grupo">
+    <button type="button" data-idioma="es" lang="es" aria-pressed="true" title="Español">ES</button>
+    <button type="button" data-idioma="en" lang="en" aria-pressed="false" title="English">EN</button>
+  </div>
+  <button id="tema" class="icono" type="button">
+    <svg class="luna" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+    <svg class="sol" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.6M12 18.9v2.6M2.5 12h2.6M18.9 12h2.6M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/></svg>
+  </button>
+  <button id="abrir-ajustes" class="boton secundario" type="button" data-i18n="ajustes">Ajustes</button>
+  <button id="buscar" class="boton" type="button" data-i18n="buscar">Buscar vuelos ahora</button>
 </header>
 
 <section class="mapa" aria-labelledby="mapa-titulo">
-  <h2 id="mapa-titulo" class="solo-lectores">Mapa de países marcados</h2>
+  <h2 id="mapa-titulo" class="solo-lectores" data-i18n="mapa.titulo">Mapa de países marcados</h2>
   <svg id="mapa" viewBox="0 0 960 470" role="img" aria-label="Mapa del mundo"></svg>
   <div id="globo" class="globo" hidden></div>
   <div class="mapa-pie">
     <p class="leyenda"><span class="muestra" aria-hidden="true"></span><span id="leyenda-texto"></span></p>
-    <div class="zoom" role="group" aria-label="Zoom del mapa">
-      <button type="button" data-zoom="alejar" aria-label="Alejar">−</button>
-      <button type="button" data-zoom="acercar" aria-label="Acercar">+</button>
-      <button type="button" data-zoom="todo">Ver todo</button>
+    <div class="zoom" role="group" aria-label="Zoom del mapa" data-i18n-aria-label="zoom.grupo">
+      <button type="button" data-zoom="alejar" aria-label="Alejar" data-i18n-aria-label="zoom.alejar">−</button>
+      <button type="button" data-zoom="acercar" aria-label="Acercar" data-i18n-aria-label="zoom.acercar">+</button>
+      <button type="button" data-zoom="todo" data-i18n="zoom.todo">Ver todo</button>
     </div>
   </div>
 </section>
@@ -38,24 +53,40 @@
   <section class="mios" aria-labelledby="mios-titulo">
     <h2 id="mios-titulo">Mis destinos</h2>
     <ul id="lista-mios" class="filas"></ul>
-    <nav id="paginas-mios" class="paginas" aria-label="Páginas de mis destinos"></nav>
+    <nav id="paginas-mios" class="paginas" aria-label="Páginas de mis destinos" data-i18n-aria-label="mios.paginas"></nav>
   </section>
 
   <section class="buscador" aria-labelledby="buscador-titulo">
-    <h2 id="buscador-titulo">Buscar destino</h2>
-    <input id="consulta" type="search" placeholder="País, ciudad o código de aeropuerto" autocomplete="off" aria-label="Buscar país o ciudad">
+    <h2 id="buscador-titulo" data-i18n="buscador.titulo">Buscar destino</h2>
+    <input id="consulta" type="search" placeholder="País, ciudad o código de aeropuerto" autocomplete="off"
+      aria-label="Buscar país o ciudad" data-i18n-placeholder="buscador.ph" data-i18n-aria-label="buscador.aria">
     <label class="casilla">
       <input id="con-visado" type="checkbox">
-      Mostrar también los países que exigen visado previo
+      <span data-i18n="buscador.visado">Mostrar también los países que exigen visado previo</span>
     </label>
     <ul id="resultados" class="filas"></ul>
-    <nav id="paginas-resultados" class="paginas" aria-label="Páginas de resultados"></nav>
+    <nav id="paginas-resultados" class="paginas" aria-label="Páginas de resultados" data-i18n-aria-label="resultados.paginas"></nav>
   </section>
 </main>
 
 <section class="recomendaciones" aria-labelledby="rec-titulo">
-  <h2 id="rec-titulo">Viajes baratos para los próximos meses</h2>
-  <div id="meses" class="meses" role="tablist" aria-label="Mes de salida"></div>
+  <h2 id="rec-titulo" data-i18n="rec.titulo">Viajes baratos para los próximos meses</h2>
+  <div id="meses" class="meses" role="tablist" aria-label="Mes de salida" data-i18n-aria-label="rec.meses"></div>
+  <div id="filtros" class="filtros" role="search" aria-label="Filtrar viajes" data-i18n-aria-label="filtro.grupo">
+    <label><span data-i18n="filtro.desde">Salida desde</span>
+      <input id="f-desde" type="date">
+    </label>
+    <label><span data-i18n="filtro.hasta">hasta</span>
+      <input id="f-hasta" type="date">
+    </label>
+    <label><span data-i18n="filtro.precio">Precio máximo</span>
+      <span class="con-unidad"><input id="f-precio" type="number" min="1" step="1" inputmode="numeric"> €</span>
+    </label>
+    <label class="crece"><span data-i18n="filtro.destino">Destino</span>
+      <input id="f-destino" type="search" autocomplete="off" placeholder="Ciudad, país o código" data-i18n-placeholder="filtro.destino.ph">
+    </label>
+    <button id="f-limpiar" class="boton secundario" type="button" data-i18n="filtro.limpiar" hidden>Quitar filtros</button>
+  </div>
   <div id="ofertas" role="tabpanel"></div>
   <p id="rec-nota" class="nota"></p>
 </section>
@@ -69,28 +100,29 @@
 
     <div id="ficha-campos">
       <fieldset>
-        <legend>Ciudades</legend>
+        <legend data-i18n="ficha.ciudades">Ciudades</legend>
         <p id="ficha-ciudades-ayuda" class="ayuda"></p>
-        <input id="ficha-filtro" type="search" placeholder="Filtrar ciudades" aria-label="Filtrar ciudades">
+        <input id="ficha-filtro" type="search" placeholder="Filtrar ciudades" aria-label="Filtrar ciudades"
+          data-i18n-placeholder="ficha.filtro" data-i18n-aria-label="ficha.filtro">
         <ul id="ficha-ciudades" class="ciudades"></ul>
       </fieldset>
 
       <fieldset>
-        <legend>Fechas de salida</legend>
-        <p class="ayuda">Sin fechas, vale cualquier día de los próximos meses.</p>
+        <legend data-i18n="ficha.fechas">Fechas de salida</legend>
+        <p class="ayuda" data-i18n="ficha.fechas.ayuda">Sin fechas, vale cualquier día de los próximos meses.</p>
         <ul id="ficha-ventanas" class="ventanas"></ul>
-        <button id="ficha-nueva-ventana" class="boton secundario" type="button">Añadir fechas</button>
+        <button id="ficha-nueva-ventana" class="boton secundario" type="button" data-i18n="ficha.nueva">Añadir fechas</button>
       </fieldset>
 
       <fieldset class="en-linea">
-        <legend>Precio y duración</legend>
-        <label>Avísame por debajo de
-          <span class="con-unidad"><input id="ficha-precio" type="number" min="1" step="1" inputmode="numeric"> € ida y vuelta</span>
+        <legend data-i18n="ficha.precio.leyenda">Precio y duración</legend>
+        <label><span data-i18n="ficha.precio">Avísame por debajo de</span>
+          <span class="con-unidad"><input id="ficha-precio" type="number" min="1" step="1" inputmode="numeric"> <span data-i18n="unidad.iv">€ ida y vuelta</span></span>
         </label>
-        <label>Noches
+        <label><span data-i18n="ficha.noches">Noches</span>
           <span class="con-unidad">
-            <input id="ficha-noches-min" type="number" min="1" max="60" aria-label="Noches mínimas"> a
-            <input id="ficha-noches-max" type="number" min="1" max="60" aria-label="Noches máximas">
+            <input id="ficha-noches-min" type="number" min="1" max="60" aria-label="Noches mínimas" data-i18n-aria-label="noches.min"> <span data-i18n="a">a</span>
+            <input id="ficha-noches-max" type="number" min="1" max="60" aria-label="Noches máximas" data-i18n-aria-label="noches.max">
           </span>
         </label>
       </fieldset>
@@ -98,9 +130,9 @@
 
     <p id="ficha-error" class="error" role="alert" hidden></p>
     <footer>
-      <button id="ficha-quitar" class="boton peligro" type="button">Quitar de mis destinos</button>
+      <button id="ficha-quitar" class="boton peligro" type="button" data-i18n="ficha.quitar">Quitar de mis destinos</button>
       <span class="hueco"></span>
-      <button id="ficha-cancelar" class="boton secundario" type="button">Cancelar</button>
+      <button id="ficha-cancelar" class="boton secundario" type="button" data-i18n="cancelar">Cancelar</button>
       <button id="ficha-guardar" class="boton" type="submit"></button>
     </footer>
   </form>
@@ -108,37 +140,38 @@
 
 <dialog id="ajustes" aria-labelledby="ajustes-titulo">
   <form id="ajustes-form" method="dialog">
-    <header><h2 id="ajustes-titulo">Ajustes</h2></header>
+    <header><h2 id="ajustes-titulo" data-i18n="ajustes">Ajustes</h2></header>
     <div class="campos">
-      <label>Meses que miro hacia delante
+      <label><span data-i18n="aj.meses">Meses que miro hacia delante</span>
         <input id="aj-meses" type="number" min="1" max="10" required>
       </label>
-      <label>Noches de un viaje normal
+      <label><span data-i18n="aj.noches">Noches de un viaje normal</span>
         <span class="con-unidad">
-          <input id="aj-noches-min" type="number" min="1" max="30" required aria-label="Noches mínimas"> a
-          <input id="aj-noches-max" type="number" min="1" max="30" required aria-label="Noches máximas">
+          <input id="aj-noches-min" type="number" min="1" max="30" required aria-label="Noches mínimas" data-i18n-aria-label="noches.min"> <span data-i18n="a">a</span>
+          <input id="aj-noches-max" type="number" min="1" max="30" required aria-label="Noches máximas" data-i18n-aria-label="noches.max">
         </span>
       </label>
-      <label>Chollo fuera de mi lista
-        <span class="con-unidad"><input id="aj-chollo" type="number" min="1" max="5000" required> € ida y vuelta</span>
-        <span class="ayuda">Un destino que no has marcado te llega si baja de este precio, o si cae un 35 % respecto a lo que suele costar. El mínimo de Ryanair ronda los 30 €: por encima de eso llegarán avisos casi a diario.</span>
+      <label><span data-i18n="aj.chollo">Chollo fuera de mi lista</span>
+        <span class="con-unidad"><input id="aj-chollo" type="number" min="1" max="5000" required> <span data-i18n="unidad.iv">€ ida y vuelta</span></span>
+        <span class="ayuda" data-i18n="aj.chollo.ayuda">Un destino que no has marcado te llega si baja de este precio, o si cae un 35 % respecto a lo que suele costar. El mínimo de Ryanair ronda los 30 €: por encima de eso llegarán avisos casi a diario.</span>
       </label>
-      <label>Consultas diarias a Google
-        <input id="aj-google" type="number" min="0" max="20" required>
-        <span class="ayuda">Para las ciudades marcadas a las que Ryanair no vuela. Cada consulta mira una fecha, así que con más ciudades marcadas cada una se revisa menos a menudo.</span>
+      <label><span data-i18n="aj.google">Consultas diarias a Google</span>
+        <input id="aj-google" type="number" min="0" max="40" required>
+        <span class="ayuda" data-i18n="aj.google.ayuda">Para las ciudades y meses marcados sin precio de Ryanair desde tu aeropuerto. Cada consulta mira una fecha; van primero los que llevan más tiempo sin precio.</span>
       </label>
     </div>
     <p id="ajustes-error" class="error" role="alert" hidden></p>
     <footer>
       <span class="hueco"></span>
-      <button id="ajustes-cancelar" class="boton secundario" type="button">Cancelar</button>
-      <button class="boton" type="submit">Guardar ajustes</button>
+      <button id="ajustes-cancelar" class="boton secundario" type="button" data-i18n="cancelar">Cancelar</button>
+      <button class="boton" type="submit" data-i18n="aj.guardar">Guardar ajustes</button>
     </footer>
   </form>
 </dialog>
 
 <script src="vendor/d3.min.js"></script>
 <script src="vendor/topojson-client.min.js"></script>
+<script src="textos.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

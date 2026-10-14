@@ -1,6 +1,8 @@
 /* Vigilante de vuelos · panel
    Referencia: señalética de aeropuerto. Amarillo = "es tuyo / está marcado" y nada más.
-   Tipografía Overpass (derivada de la rotulación de carreteras), una sola familia. */
+   Tipografía Overpass (derivada de la rotulación de carreteras), una sola familia.
+   Tema claro y oscuro: el del sistema, salvo que se elija otro (data-theme en <html>).
+   La barra y el mapa son azul noche en los dos. */
 
 @font-face {
   font-family: "Overpass";
@@ -18,17 +20,50 @@
 }
 
 :root {
+  color-scheme: light;
   --tinta: #10233a;
+  --tinta-viva: #1c3a5c; /* el botón principal al pasar por encima */
   --mar: #0f2a44;
   --tierra: #35526f;
   --senal: #ffd21f;
+  --sobre-senal: #10233a; /* texto sobre amarillo, igual en los dos temas */
+  --sobre-mar: #ffffff; /* texto sobre la barra y el mapa */
   --papel: #ffffff;
   --niebla: #eef2f6;
   --linea: #d3dbe4;
+  --linea-viva: #a9b6c5;
   --gris: #566579;
   --peligro: #a8261c;
+  --peligro-fondo: #fbe9e7;
   --radio: 6px;
   --ancho: 1180px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --tinta: #e6edf5;
+    --tinta-viva: #c4d2e1;
+    --papel: #13263b;
+    --niebla: #0a1726;
+    --linea: #2a425c;
+    --linea-viva: #4f6984;
+    --gris: #9fb1c5;
+    --peligro: #ff9184;
+    --peligro-fondo: #3b1813;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --tinta: #e6edf5;
+  --tinta-viva: #c4d2e1;
+  --papel: #13263b;
+  --niebla: #0a1726;
+  --linea: #2a425c;
+  --linea-viva: #4f6984;
+  --gris: #9fb1c5;
+  --peligro: #ff9184;
+  --peligro-fondo: #3b1813;
 }
 
 * { box-sizing: border-box; }
@@ -76,7 +111,7 @@ button, input { font: inherit; color: inherit; }
   cursor: pointer;
   white-space: nowrap;
 }
-.boton:hover { background: #1c3a5c; border-color: #1c3a5c; }
+.boton:hover { background: var(--tinta-viva); border-color: var(--tinta-viva); }
 .boton[disabled] { opacity: 0.55; cursor: progress; }
 .boton.secundario { background: transparent; color: var(--tinta); }
 .boton.secundario:hover { background: var(--niebla); border-color: var(--tinta); }
@@ -95,7 +130,7 @@ button, input { font: inherit; color: inherit; }
   min-width: 6.2rem;
 }
 .marcar:hover { background: var(--niebla); }
-.marcar[aria-pressed="true"] { background: var(--senal); }
+.marcar[aria-pressed="true"] { background: var(--senal); border-color: var(--senal); color: var(--sobre-senal); }
 .marcar[aria-pressed="true"]:hover { background: #ffdc4d; }
 
 input[type="text"], input[type="search"], input[type="number"], input[type="date"] {
@@ -105,7 +140,7 @@ input[type="text"], input[type="search"], input[type="number"], input[type="date
   padding: 0.4rem 0.6rem 0.3rem;
   min-width: 0;
 }
-input:hover { border-color: #a9b6c5; }
+input:hover { border-color: var(--linea-viva); }
 input:focus-visible { border-color: var(--tinta); outline-offset: 0; }
 input[type="number"] { width: 5.2rem; font-variant-numeric: tabular-nums; }
 
@@ -116,7 +151,7 @@ input[type="checkbox"] { accent-color: var(--tinta); width: 1rem; height: 1rem; 
 
 .barra {
   background: var(--mar);
-  color: var(--papel);
+  color: var(--sobre-mar);
   display: flex;
   align-items: center;
   gap: 0.75rem 1.25rem;
@@ -133,16 +168,48 @@ input[type="checkbox"] { accent-color: var(--tinta); width: 1rem; height: 1rem; 
   letter-spacing: 0.08em;
   background: var(--senal);
   border-color: var(--senal);
-  color: var(--tinta);
+  color: var(--sobre-senal);
   padding-inline: 0.3rem;
 }
-#origen-ciudad { color: var(--papel); font-weight: 600; }
+#origen-ciudad { color: var(--sobre-mar); font-weight: 600; }
 .estado { margin-left: auto; color: #c3d0de; font-size: 0.875rem; text-align: right; }
 .estado.mal { color: #ffb4a8; }
-.barra .boton { background: var(--senal); border-color: var(--senal); color: var(--tinta); }
+.barra .boton { background: var(--senal); border-color: var(--senal); color: var(--sobre-senal); }
 .barra .boton:hover { background: #ffdc4d; border-color: #ffdc4d; }
-.barra .boton.secundario { background: transparent; border-color: #5d7892; color: var(--papel); }
+.barra .boton.secundario { background: transparent; border-color: #5d7892; color: var(--sobre-mar); }
 .barra .boton.secundario:hover { background: #1b3d60; border-color: #8ba3bb; }
+
+/* Idioma y tema: controles pequeños, del mismo azul que el resto de la barra. */
+.idioma { display: flex; border: 2px solid #5d7892; border-radius: var(--radio); overflow: hidden; }
+.idioma button {
+  background: transparent;
+  border: 0;
+  color: #c3d0de;
+  padding: 0.3rem 0.55rem 0.2rem;
+  font-weight: 800;
+  font-size: 0.8125rem;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+.idioma button + button { border-left: 2px solid #5d7892; }
+.idioma button:hover { background: #1b3d60; color: var(--sobre-mar); }
+.idioma button[aria-pressed="true"] { background: var(--sobre-mar); color: var(--mar); }
+.icono {
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  background: transparent;
+  border: 2px solid #5d7892;
+  border-radius: var(--radio);
+  color: var(--sobre-mar);
+  cursor: pointer;
+}
+.icono:hover { background: #1b3d60; border-color: #8ba3bb; }
+.icono svg { width: 1.15rem; height: 1.15rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.icono .luna { fill: currentColor; stroke: none; }
+.icono .sol, .icono.oscuro .luna { display: none; }
+.icono.oscuro .sol { display: block; }
 
 /* ---------- mapa ---------- */
 
@@ -182,7 +249,7 @@ input[type="checkbox"] { accent-color: var(--tinta); width: 1rem; height: 1rem; 
   max-width: 16rem;
 }
 .globo strong { display: block; font-size: 0.9375rem; }
-.globo .tuyo { background: var(--senal); padding: 0 0.3rem; border-radius: 3px; font-weight: 700; }
+.globo .tuyo { background: var(--senal); color: var(--sobre-senal); padding: 0 0.3rem; border-radius: 3px; font-weight: 700; }
 
 .mapa-pie {
   max-width: var(--ancho);
@@ -202,7 +269,7 @@ input[type="checkbox"] { accent-color: var(--tinta); width: 1rem; height: 1rem; 
   background: transparent;
   border: 2px solid #5d7892;
   border-radius: var(--radio);
-  color: var(--papel);
+  color: var(--sobre-mar);
   min-width: 2.1rem;
   padding: 0.15rem 0.6rem 0.05rem;
   font-weight: 700;
@@ -221,7 +288,7 @@ input[type="checkbox"] { accent-color: var(--tinta); width: 1rem; height: 1rem; 
   gap: 2.5rem;
   align-items: start;
 }
-.cuerpo h2, .recomendaciones h2 {
+.cuerpo h2, .recomendaciones > h2 {
   font-size: 1.5rem;
   font-weight: 800;
   letter-spacing: -0.015em;
@@ -336,10 +403,40 @@ input[type="checkbox"] { accent-color: var(--tinta); width: 1rem; height: 1rem; 
 .oferta .ciudad { font-weight: 800; font-size: 1.125rem; line-height: 1.2; }
 .oferta .pais, .oferta .aerolinea, .oferta .noches { color: var(--gris); font-size: 0.8438rem; }
 .oferta .pais, .oferta .noches { display: block; }
-.oferta .etiqueta { background: var(--senal); border-radius: 3px; padding: 0 0.35rem; font-weight: 700; font-size: 0.75rem; color: var(--tinta); margin-left: 0.4rem; vertical-align: 0.1em; }
 .oferta .fechas { font-variant-numeric: tabular-nums; font-weight: 600; }
 .oferta .precio { text-align: right; font-weight: 800; font-size: 1.375rem; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .oferta .precio small { display: block; font-size: 0.75rem; font-weight: 600; color: var(--gris); letter-spacing: 0; }
+.oferta .precio .visto { font-weight: 400; font-style: italic; }
+/* Un destino tuyo sin precio: misma fila, pero apagada y sin enlace. */
+.oferta.sin-precio:hover { background: none; }
+.oferta.sin-precio .ciudad { color: var(--gris); }
+.oferta.sin-precio .banda { opacity: 0.45; }
+.oferta .falta { grid-column: 3 / -1; justify-self: end; color: var(--gris); font-size: 0.875rem; font-style: italic; }
+
+.filtros {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.75rem 1.25rem;
+  padding: 1rem 0 0.25rem;
+}
+.filtros label { display: grid; gap: 0.25rem; font-weight: 700; font-size: 0.8125rem; color: var(--gris); }
+.filtros .con-unidad { color: var(--tinta); font-size: 0.9375rem; }
+.filtros .crece { flex: 1 1 13rem; }
+.filtros .crece input { width: 100%; }
+.filtros .boton { margin-bottom: 0.1rem; }
+
+.grupo { padding-top: 1.6rem; }
+.grupo h3 { font-size: 1.1875rem; font-weight: 800; letter-spacing: -0.01em; line-height: 1.2; margin: 0; }
+.grupo h3 small { font-size: 0.9375rem; font-weight: 600; color: var(--gris); letter-spacing: 0; }
+.grupo > .ayuda { color: var(--gris); font-size: 0.875rem; padding: 0.1rem 0 0.6rem; }
+.lista-ofertas { border-top: 2px solid var(--tinta); }
+.lista-ofertas > .sin-ofertas { padding: 1rem 0; }
+
+.sin-vuelos { padding-top: 0.7rem; color: var(--gris); font-size: 0.875rem; }
+.sin-vuelos summary { cursor: pointer; font-weight: 700; width: fit-content; }
+.sin-vuelos summary:hover { color: var(--tinta); }
+.sin-vuelos p { padding-top: 0.35rem; max-width: 52rem; }
 
 .sin-ofertas { padding: 1.5rem 0; color: var(--gris); max-width: 36rem; }
 .sin-ofertas strong { display: block; color: var(--tinta); font-size: 1.0625rem; }
@@ -353,6 +450,7 @@ dialog {
   padding: 0;
   width: min(36rem, calc(100vw - 2rem));
   max-height: calc(100vh - 2rem);
+  background: var(--papel);
   color: var(--tinta);
   box-shadow: 0 18px 50px rgb(4 16 30 / 0.4);
 }
@@ -395,7 +493,7 @@ dialog .campos .ayuda { font-weight: 400; margin: 0; }
 .error {
   margin: 0 1.5rem;
   padding: 0.55rem 0.8rem 0.45rem;
-  background: #fbe9e7;
+  background: var(--peligro-fondo);
   color: var(--peligro);
   border-radius: var(--radio);
   font-weight: 600;
@@ -412,6 +510,9 @@ dialog footer { display: flex; align-items: center; gap: 0.6rem; padding: 0.9rem
   .oferta .banda { grid-row: span 2; }
   .oferta .aerolinea { display: none; }
   .oferta .precio { grid-row: 1 / span 2; grid-column: 3; }
+  .oferta .falta { grid-column: 2; justify-self: start; }
+  .filtros label:not(.crece) { flex: 1 1 8rem; }
+  .filtros input[type="date"] { width: 100%; }
   .filas > li.relleno { display: none; }
 }
 

@@ -24,7 +24,9 @@ POR_DEFECTO = {
         # debajo del suelo de Ryanair (2 x 14,99 €): con 35 € avisaría casi a diario
         # de precios que son normales. Lo no marcado avisa sobre todo por bajada.
         "chollo_max": 25,
-        "consultas_google": 8,  # tope diario de consultas a Google para ciudades sin Ryanair
+        # Tope diario de consultas a Google para las ciudades y meses marcados que
+        # Ryanair no cubre. Con 25, unas 45 ciudades x 7 meses se renuevan cada dos semanas.
+        "consultas_google": 25,
     },
     "paises": {},
 }
@@ -33,7 +35,7 @@ LIMITES = {
     "noches_min": (1, 30),
     "noches_max": (1, 30),
     "chollo_max": (1, 5000),
-    "consultas_google": (0, 20),
+    "consultas_google": (0, 40),
 }
 
 
