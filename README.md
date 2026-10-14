@@ -24,7 +24,9 @@ The panel can be switched between Spanish and English; the alerts and the code c
 - **Entry requirements:** each country shows the entry requirement for a Spanish passport; countries that need a visa in advance are hidden unless you ask for them.
 - **Runs unattended:** a Windows scheduled task fires hourly from 08:00, but only the first successful run of the day queries prices, so it still works if the PC was off in the morning.
 
-![Cheapest trips, with saved destinations listed first](docs/screenshots/recommendations.png)
+![Cheap trips: month tabs, filters and every saved city with its cheapest flight](docs/screenshots/recommendations.png)
+
+![The same list in English with the dark theme](docs/screenshots/recommendations-dark-en.png)
 
 ## Tech stack
 
